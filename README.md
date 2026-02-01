@@ -27,10 +27,17 @@ GIF status:
 - Graphic Control Extension user-input flags captured per frame.
 - Delay=0 honored as "no delay" (no clamping).
 
+BMP status:
+- Windows BMP (all versions) and OS/2 BMP support
+- Compression: BI_RGB (uncompressed), BI_RLE8, BI_RLE4, BI_BITFIELDS, BI_JPEG, BI_PNG
+- Bit depths: 1-bit (monochrome), 4-bit/8-bit (indexed), 16-bit/24-bit/32-bit (RGB/RGBA)
+- Headers: BITMAPCOREHEADER (OS/2), BITMAPINFOHEADER, V2/V3/V4/V5
+- Top-down and bottom-up orientation support
+- Auto-conversion of pre-multiplied alpha to straight alpha
+
 Todo
 
 - [ ] For each image foramt provide option for checkerboard or white for alpha
-- [ ] BMP
 - [ ] TIFF
 - [ ] ICO
 - [ ] HEIC / HEIF
@@ -45,7 +52,8 @@ cc -Isrc -c src/cupidimage_webp.c -o obj/cupidimage_webp.o
 cc -Isrc -c src/cupidimage_webp_tables.c -o obj/cupidimage_webp_tables.o
 cc -Isrc -c src/cupidimage_webp_lossless.c -o obj/cupidimage_webp_lossless.o
 cc -Isrc -c src/cupidimage_gif.c -o obj/cupidimage_gif.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o
+cc -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o
 ```
 
 Enable JPEG debug logging:
@@ -53,9 +61,14 @@ Enable JPEG debug logging:
 cc -DCUPIDIMAGE_JPEG_DEBUG -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
 ```
 
+Enable BMP debug logging:
+```sh
+cc -DCUPIDIMAGE_BMP_DEBUG -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
+```
+
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_cli.c -o bin/cupidimage
 ```
 
 Run:
@@ -63,6 +76,11 @@ Run:
 ./bin/cupidimage test.png 120 60
 ./bin/cupidimage test.jpg 120 60
 ./bin/cupidimage test.webp 120 60
+```
+
+Quick BMP smoke test (expects failures for invalid samples):
+```sh
+scripts/test_bmp_assets.sh
 ```
 
 Example usage:

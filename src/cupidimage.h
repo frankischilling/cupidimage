@@ -43,6 +43,10 @@ int cupidimage_load_gif(const unsigned char *data, size_t size, cupidimage_image
                         char *err, size_t errcap);
 int cupidimage_load_gif_file(const char *path, cupidimage_image *out,
                              char *err, size_t errcap);
+int cupidimage_load_bmp(const unsigned char *data, size_t size, cupidimage_image *out,
+                        char *err, size_t errcap);
+int cupidimage_load_bmp_file(const char *path, cupidimage_image *out,
+                             char *err, size_t errcap);
 int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
                                   cupidimage_animation *out,
                                   char *err, size_t errcap);
