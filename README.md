@@ -21,8 +21,11 @@ WebP status:
 
 GIF status:
 - GIF87a/GIF89a single-frame decode and animated GIF composition.
-- Global/local palettes, interlacing, transparency, and disposal methods 0-3.
+- Global/local palettes, interlacing, transparency, and disposal methods 0-3 (4-7 treated as no-dispose).
 - Netscape/ANIMEXTS loop counts honored for animation playback.
+- Pixel aspect ratio and color resolution parsed and exposed in animation metadata.
+- Graphic Control Extension user-input flags captured per frame.
+- Delay=0 honored as "no delay" (no clamping).
 
 Todo
 

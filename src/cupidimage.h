@@ -22,6 +22,9 @@ typedef struct cupidimage_animation {
     uint32_t loop_count;
     uint32_t *delays;
     cupidimage_image *frames;
+    uint8_t pixel_aspect_ratio; /* GIF: (value + 15) / 64 when non-zero */
+    uint8_t color_resolution;   /* GIF: 0-7 (1-8 bits per component) */
+    uint8_t *user_input_flags;  /* GIF: per-frame user input flag */
 } cupidimage_animation;
 
 int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image *out,

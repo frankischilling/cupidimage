@@ -287,6 +287,11 @@ static void gif_apply_disposal(uint8_t *canvas, const uint8_t *restore,
                                uint32_t w, uint32_t h,
                                int disposal,
                                uint8_t bg_r, uint8_t bg_g, uint8_t bg_b, uint8_t bg_a) {
+    /* Method 0: no disposal specified (leave pixels) */
+    /* Method 1: do not dispose (leave pixels) */
+    /* Method 2: restore to background color */
+    /* Method 3: restore to previous */
+    /* Methods 4-7: undefined, treat as do not dispose */
     if (disposal == 2) {
         gif_fill_rect(canvas, canvas_w, left, top, w, h, bg_r, bg_g, bg_b, bg_a);
     } else if (disposal == 3 && restore) {
@@ -322,6 +327,10 @@ int cupidimage_load_gif(const unsigned char *data, size_t size, cupidimage_image
     int gct_flag = (packed & 0x80) != 0;
     int gct_size = 1 << ((packed & 0x07) + 1);
     uint8_t bg_index = data[11];
+    int color_resolution = (packed >> 4) & 0x07;
+    uint8_t pixel_aspect_ratio = data[12];
+    (void)color_resolution;
+    (void)pixel_aspect_ratio;
 
     size_t off = 13;
     uint8_t global_palette[256 * 3];
@@ -618,12 +627,16 @@ void cupidimage_free_animation(cupidimage_animation *anim) {
     }
     free(anim->frames);
     free(anim->delays);
+    free(anim->user_input_flags);
     anim->frames = NULL;
     anim->delays = NULL;
+    anim->user_input_flags = NULL;
     anim->frame_count = 0;
     anim->width = 0;
     anim->height = 0;
     anim->loop_count = 0;
+    anim->pixel_aspect_ratio = 0;
+    anim->color_resolution = 0;
 }
 
 int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
@@ -652,6 +665,8 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
     int gct_flag = (packed & 0x80) != 0;
     int gct_size = 1 << ((packed & 0x07) + 1);
     uint8_t bg_index = data[11];
+    int color_resolution = (packed >> 4) & 0x07;
+    uint8_t pixel_aspect_ratio = data[12];
 
     size_t off = 13;
     uint8_t global_palette[256 * 3];
@@ -696,6 +711,7 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
     int gce_transparent = 0;
     uint8_t gce_trans_index = 0;
     uint16_t gce_delay = 0;
+    int gce_user_input = 0;
 
     int prev_disposal = 0;
     uint32_t prev_left = 0, prev_top = 0, prev_w = 0, prev_h = 0;
@@ -707,6 +723,7 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
     uint32_t frame_count = 0;
     cupidimage_image *frames = NULL;
     uint32_t *delays = NULL;
+    uint8_t *user_input_flags = NULL;
 
     while (off < size) {
         uint8_t introducer = data[off++];
@@ -739,6 +756,7 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
                     goto fail;
                 }
                 gce_disposal = (packed_gce >> 2) & 0x07;
+                gce_user_input = (packed_gce >> 1) & 0x01;
                 gce_transparent = packed_gce & 0x01;
             } else if (label == 0xFF) {
                 if (off >= size) {
@@ -884,14 +902,17 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
             uint32_t new_cap = frame_cap ? frame_cap * 2u : 4u;
             cupidimage_image *new_frames = (cupidimage_image *)realloc(frames, new_cap * sizeof(*frames));
             uint32_t *new_delays = (uint32_t *)realloc(delays, new_cap * sizeof(*delays));
-            if (!new_frames || !new_delays) {
+            uint8_t *new_flags = (uint8_t *)realloc(user_input_flags, new_cap * sizeof(*new_flags));
+            if (!new_frames || !new_delays || !new_flags) {
                 free(new_frames);
                 free(new_delays);
+                free(new_flags);
                 set_err(err, errcap, "out of memory");
                 goto fail;
             }
             frames = new_frames;
             delays = new_delays;
+            user_input_flags = new_flags;
             frame_cap = new_cap;
         }
 
@@ -905,10 +926,8 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
         frames[frame_count].height = height;
         frames[frame_count].rgba = frame_rgba;
         uint32_t delay_ms = (uint32_t)gce_delay * 10u;
-        if (delay_ms == 0) {
-            delay_ms = 10;
-        }
         delays[frame_count] = delay_ms;
+        user_input_flags[frame_count] = (uint8_t)gce_user_input;
         frame_count++;
 
         prev_disposal = gce_disposal;
@@ -919,6 +938,7 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
         have_prev = 1;
 
         gce_disposal = 0;
+        gce_user_input = 0;
         gce_transparent = 0;
         gce_trans_index = 0;
         gce_delay = 0;
@@ -937,6 +957,9 @@ int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
     out->loop_count = loop_count;
     out->frames = frames;
     out->delays = delays;
+    out->pixel_aspect_ratio = pixel_aspect_ratio;
+    out->color_resolution = (uint8_t)color_resolution;
+    out->user_input_flags = user_input_flags;
     return 1;
 
 fail:
@@ -949,6 +972,7 @@ fail:
     }
     free(frames);
     free(delays);
+    free(user_input_flags);
     return 0;
 }
 
