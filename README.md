@@ -14,9 +14,14 @@ Supported JPEG features:
 Not supported: arithmetic coding or sampling factors above 2x2.
 
 WebP status:
-- VP8 lossy keyframe decode implemented (single-partition streams only).
-- ALPH chunk method 0 (raw alpha) supported.
-- Not supported: VP8X/VP8L, interframes, multi-partition streams, loop filter, ALPH filtering/preprocessing.
+- VP8 lossy keyframe decode (single-partition streams only) with loop filter.
+- VP8X container support for still images and VP8L lossless decode with transforms/color cache.
+- ALPH chunk method 0 (raw alpha) supported for VP8.
+- Not supported (priority order): animations, interframes, multi-partition streams, ALPH filtering/preprocessing, ICC/EXIF/XMP.
+
+Todo
+
+- [ ] For each image foramt provide option for checkerboard or white for alpha
 
 Build (static library):
 ```sh
@@ -24,7 +29,8 @@ cc -Isrc -c src/cupidimage.c -o obj/cupidimage.o
 cc -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
 cc -Isrc -c src/cupidimage_webp.c -o obj/cupidimage_webp.o
 cc -Isrc -c src/cupidimage_webp_tables.c -o obj/cupidimage_webp_tables.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o
+cc -Isrc -c src/cupidimage_webp_lossless.c -o obj/cupidimage_webp_lossless.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o
 ```
 
 Enable JPEG debug logging:
@@ -34,7 +40,7 @@ cc -DCUPIDIMAGE_JPEG_DEBUG -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_cli.c -o bin/cupidimage
 ```
 
 Run:

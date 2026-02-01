@@ -1,5 +1,6 @@
 #include "cupidimage.h"
 #include "cupidimage_webp_tables.h"
+#include "cupidimage_webp_lossless.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,10 @@ static void set_err(char *err, size_t errcap, const char *msg) {
 
 static uint32_t read_le32(const unsigned char *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint32_t read_le24(const unsigned char *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16);
 }
 
 static uint8_t clamp_u8(int v) {
@@ -665,6 +670,147 @@ static void wht4x4(const int16_t *input, int16_t *output) {
     }
 }
 
+static int clamp_level(int level) {
+    if (level < 0) return 0;
+    if (level > 63) return 63;
+    return level;
+}
+
+static int filter_level_for_mb(int base_level, int seg_enabled, int seg_abs, const int seg_lf[4], int seg_id) {
+    int level = base_level;
+    if (seg_enabled) {
+        if (seg_abs) {
+            level = seg_lf[seg_id & 3];
+        } else {
+            level += seg_lf[seg_id & 3];
+        }
+    }
+    return clamp_level(level);
+}
+
+static void filter_params(int level, int sharpness, int *limit, int *interior, int *hev) {
+    int lim = level;
+    int ilim = level;
+    if (sharpness > 0) {
+        lim >>= 1;
+        ilim >>= 1;
+    }
+    if (sharpness > 4) {
+        lim >>= 1;
+        ilim >>= 1;
+    }
+    if (lim < 1) lim = 1;
+    if (ilim < 1) ilim = 1;
+    *limit = lim;
+    *interior = ilim;
+    *hev = (level >= 40) ? 2 : (level >= 20 ? 1 : 0);
+}
+
+static void filter_sample(uint8_t *p1, uint8_t *p0, uint8_t *q0, uint8_t *q1,
+                          int limit, int interior, int hev_thr, int simple) {
+    int P1 = *p1;
+    int P0 = *p0;
+    int Q0 = *q0;
+    int Q1 = *q1;
+    int mask = (abs(P0 - Q0) * 2 + abs(P1 - Q1) / 2 <= limit) &&
+               (abs(P1 - P0) <= interior) &&
+               (abs(Q1 - Q0) <= interior);
+    if (!mask) {
+        return;
+    }
+    int hev = (abs(P1 - P0) > hev_thr) || (abs(Q1 - Q0) > hev_thr);
+    int delta = ((Q0 - P0) * 3 + (P1 - Q1) + 4) >> 3;
+    if (delta > 127) delta = 127;
+    if (delta < -128) delta = -128;
+    P0 = clamp_u8(P0 + delta);
+    Q0 = clamp_u8(Q0 - delta);
+    if (!simple && !hev) {
+        int delta2 = (P1 - Q1 + 1) >> 1;
+        P1 = clamp_u8(P1 + delta2);
+        Q1 = clamp_u8(Q1 - delta2);
+    }
+    *p1 = (uint8_t)P1;
+    *p0 = (uint8_t)P0;
+    *q0 = (uint8_t)Q0;
+    *q1 = (uint8_t)Q1;
+}
+
+static void filter_edge_vertical(uint8_t *plane, int stride, int x, int y, int len,
+                                 int limit, int interior, int hev, int simple, int width) {
+    if (x < 2 || x + 1 >= width) {
+        return;
+    }
+    for (int i = 0; i < len; i++) {
+        uint8_t *row = plane + (y + i) * stride;
+        filter_sample(&row[x - 2], &row[x - 1], &row[x], &row[x + 1], limit, interior, hev, simple);
+    }
+}
+
+static void filter_edge_horizontal(uint8_t *plane, int stride, int x, int y, int len,
+                                   int limit, int interior, int hev, int simple, int height) {
+    if (y < 2 || y + 1 >= height) {
+        return;
+    }
+    for (int i = 0; i < len; i++) {
+        uint8_t *col = plane + (y - 2) * stride + (x + i);
+        filter_sample(col, col + stride, col + 2 * stride, col + 3 * stride, limit, interior, hev, simple);
+    }
+}
+
+static void loop_filter_plane(uint8_t *plane, int stride, int width, int height,
+                              int mb_cols, int mb_rows, const uint8_t *seg_ids,
+                              int base_level, int sharpness, int filter_type,
+                              int seg_enabled, int seg_abs, const int seg_lf[4], int is_uv) {
+    int mb_size = is_uv ? 8 : 16;
+    int edge_step = 4;
+    int simple = (filter_type != 0);
+
+    for (int mb_y = 0; mb_y < mb_rows; mb_y++) {
+        for (int mb_x = 0; mb_x < mb_cols; mb_x++) {
+            size_t mb_index = (size_t)mb_y * (size_t)mb_cols + (size_t)mb_x;
+            int level = filter_level_for_mb(base_level, seg_enabled, seg_abs, seg_lf, seg_ids[mb_index]);
+            if (level == 0) {
+                continue;
+            }
+            int limit = 0, interior = 0, hev = 0;
+            filter_params(level, sharpness, &limit, &interior, &hev);
+
+            int base_x = mb_x * mb_size;
+            int base_y = mb_y * mb_size;
+            int max_x = base_x + mb_size;
+            int max_y = base_y + mb_size;
+            if (max_x > width) max_x = width;
+            if (max_y > height) max_y = height;
+            int len_v = max_y - base_y;
+            int len_h = max_x - base_x;
+
+            if (base_x > 0) {
+                int left_level = filter_level_for_mb(base_level, seg_enabled, seg_abs, seg_lf,
+                                                     seg_ids[mb_index - 1]);
+                int use_level = left_level > level ? left_level : level;
+                int lim2 = 0, int2 = 0, hev2 = 0;
+                filter_params(use_level, sharpness, &lim2, &int2, &hev2);
+                filter_edge_vertical(plane, stride, base_x, base_y, len_v, lim2, int2, hev2, simple, width);
+            }
+            for (int x = base_x + edge_step; x < max_x; x += edge_step) {
+                filter_edge_vertical(plane, stride, x, base_y, len_v, limit, interior, hev, simple, width);
+            }
+
+            if (base_y > 0) {
+                int top_level = filter_level_for_mb(base_level, seg_enabled, seg_abs, seg_lf,
+                                                    seg_ids[mb_index - mb_cols]);
+                int use_level = top_level > level ? top_level : level;
+                int lim2 = 0, int2 = 0, hev2 = 0;
+                filter_params(use_level, sharpness, &lim2, &int2, &hev2);
+                filter_edge_horizontal(plane, stride, base_x, base_y, len_h, lim2, int2, hev2, simple, height);
+            }
+            for (int y = base_y + edge_step; y < max_y; y += edge_step) {
+                filter_edge_horizontal(plane, stride, base_x, y, len_h, limit, interior, hev, simple, height);
+            }
+        }
+    }
+}
+
 typedef struct vp8_dequant {
     int y1_dc;
     int y1_ac;
@@ -878,9 +1024,9 @@ static int cupidimage_decode_vp8(const unsigned char *data, size_t size,
         }
     }
 
-    (void)vp8_br_read_bit(&br, 128); /* filter type */
-    (void)vp8_br_read_bits(&br, 6);  /* loop filter level */
-    (void)vp8_br_read_bits(&br, 3);  /* sharpness */
+    int filter_type = vp8_br_read_bit(&br, 128);
+    int loop_filter_level = (int)vp8_br_read_bits(&br, 6);
+    int sharpness = (int)vp8_br_read_bits(&br, 3);
 
     int loop_filter_delta_enabled = vp8_br_read_bit(&br, 128);
     if (loop_filter_delta_enabled) {
@@ -1003,6 +1149,7 @@ static int cupidimage_decode_vp8(const unsigned char *data, size_t size,
     (void)payload_off;
     (void)seg_update_data;
     (void)seg_lf;
+    (void)loop_filter_delta_enabled;
 
     vp8_dequant dqf[4];
     for (int i = 0; i < 4; i++) {
@@ -1250,6 +1397,18 @@ static int cupidimage_decode_vp8(const unsigned char *data, size_t size,
         return 0;
     }
 
+    if (loop_filter_level > 0) {
+        loop_filter_plane(y_plane, width, width, height, mb_cols, mb_rows, seg_ids,
+                          loop_filter_level, sharpness, filter_type,
+                          seg_enabled, seg_abs, seg_lf, 0);
+        loop_filter_plane(u_plane, uv_w, uv_w, uv_h, mb_cols, mb_rows, seg_ids,
+                          loop_filter_level, sharpness, filter_type,
+                          seg_enabled, seg_abs, seg_lf, 1);
+        loop_filter_plane(v_plane, uv_w, uv_w, uv_h, mb_cols, mb_rows, seg_ids,
+                          loop_filter_level, sharpness, filter_type,
+                          seg_enabled, seg_abs, seg_lf, 1);
+    }
+
     yuv_to_rgba(y_plane, u_plane, v_plane, alpha, width, height, uv_w, out->rgba);
 
     free(y_modes);
@@ -1280,8 +1439,14 @@ int cupidimage_load_webp(const unsigned char *data, size_t size, cupidimage_imag
 
     const unsigned char *vp8 = NULL;
     size_t vp8_size = 0;
+    const unsigned char *vp8l = NULL;
+    size_t vp8l_size = 0;
     const unsigned char *alph = NULL;
     size_t alph_size = 0;
+    int has_vp8x = 0;
+    uint8_t vp8x_flags = 0;
+    uint32_t vp8x_width = 0;
+    uint32_t vp8x_height = 0;
 
     size_t off = 12;
     while (off + 8 <= size) {
@@ -1292,14 +1457,35 @@ int cupidimage_load_webp(const unsigned char *data, size_t size, cupidimage_imag
             set_err(err, errcap, "truncated WebP");
             return 0;
         }
-        if (memcmp(chunk, "VP8 ", 4) == 0) {
+        if (memcmp(chunk, "VP8X", 4) == 0) {
+            if (csize < 10) {
+                set_err(err, errcap, "invalid VP8X chunk");
+                return 0;
+            }
+            has_vp8x = 1;
+            vp8x_flags = data[off];
+            vp8x_width = read_le24(data + off + 4) + 1;
+            vp8x_height = read_le24(data + off + 7) + 1;
+        } else if (memcmp(chunk, "VP8 ", 4) == 0) {
             vp8 = data + off;
             vp8_size = csize;
+        } else if (memcmp(chunk, "VP8L", 4) == 0) {
+            vp8l = data + off;
+            vp8l_size = csize;
         } else if (memcmp(chunk, "ALPH", 4) == 0) {
             alph = data + off;
             alph_size = csize;
         }
         off += csize + (csize & 1u);
+    }
+
+    if (has_vp8x && (vp8x_flags & 0x02)) {
+        set_err(err, errcap, "animated WebP not supported");
+        return 0;
+    }
+
+    if (vp8l && vp8l_size > 0) {
+        return cupidimage_decode_vp8l(vp8l, vp8l_size, out, err, errcap);
     }
 
     if (!vp8 || vp8_size < 10) {
@@ -1339,6 +1525,8 @@ int cupidimage_load_webp(const unsigned char *data, size_t size, cupidimage_imag
         }
     }
 
+    (void)vp8x_width;
+    (void)vp8x_height;
     return cupidimage_decode_vp8(vp8, vp8_size, alpha_plane, alpha_plane_size, out, err, errcap);
 }
 
