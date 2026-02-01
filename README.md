@@ -5,15 +5,13 @@ Supported PNG features:
 - Color types: grayscale (0), RGB (2), grayscale+alpha (4), RGBA (6) at 8-bit or 16-bit depth
 - Indexed-color (palette) PNGs (color type 3) with bit depths 1/2/4/8 and tRNS alpha
 
-Not supported: 16-bit palette PNGs or 1/2/4-bit grayscale.
-
 Supported JPEG features:
 - JPEG (ISO/IEC 10918-1) baseline or progressive DCT, Huffman-coded, 8-bit precision
-- Grayscale and YCbCr (3-component) images
+- Grayscale, YCbCr (3-component), and CMYK/YCCK (4-component) images
 - Sampling factors up to 2x2 (e.g., 4:2:0, 4:2:2, 4:4:4)
 - Uses the standard JPEG Huffman tables (Annex K) if a file omits DHT segments
 
-Not supported: arithmetic coding, CMYK, or sampling factors above 2x2.
+Not supported: arithmetic coding or sampling factors above 2x2.
 
 Build (static library):
 ```sh

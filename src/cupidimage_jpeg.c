@@ -743,6 +743,7 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
                                    int mcu_cols, int mcu_rows,
                                    int hmax, int vmax,
                                    const int qtables[4][64],
+                                   int adobe_transform,
                                    cupidimage_image *out,
                                    char *err, size_t errcap) {
     size_t rgba_size = (size_t)width * (size_t)height * 4u;
@@ -760,9 +761,9 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
     int mcu_w = hmax * 8;
     int mcu_h = vmax * 8;
 
-    uint8_t comp_buf[3][16 * 16];
-    int comp_w[3] = {0, 0, 0};
-    int comp_h[3] = {0, 0, 0};
+    uint8_t comp_buf[4][16 * 16];
+    int comp_w[4] = {0, 0, 0, 0};
+    int comp_h[4] = {0, 0, 0, 0};
     for (int i = 0; i < num_comp; i++) {
         comp_w[i] = comps[i].h * 8;
         comp_h[i] = comps[i].v * 8;
@@ -771,10 +772,12 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
     int idx_y = 0;
     int idx_cb = (num_comp > 1) ? 1 : 0;
     int idx_cr = (num_comp > 2) ? 2 : 0;
+    int idx_k = (num_comp > 3) ? 3 : 0;
     for (int i = 0; i < num_comp; i++) {
         if (comps[i].id == 1) idx_y = i;
         if (comps[i].id == 2) idx_cb = i;
         if (comps[i].id == 3) idx_cr = i;
+        if (comps[i].id == 4) idx_k = i;
     }
 
     int32_t deq[64];
@@ -824,7 +827,7 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
                         r = yv;
                         g = yv;
                         b = yv;
-                    } else {
+                    } else if (num_comp == 3) {
                         int yw = comp_w[idx_y];
                         int yh = comp_h[idx_y];
                         int cbw = comp_w[idx_cb];
@@ -857,6 +860,69 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
                         r = (uint8_t)rtmp;
                         g = (uint8_t)gtmp;
                         b = (uint8_t)btmp;
+                    } else {
+                        int yw = comp_w[idx_y];
+                        int yh = comp_h[idx_y];
+                        int cbw = comp_w[idx_cb];
+                        int cbh = comp_h[idx_cb];
+                        int crw = comp_w[idx_cr];
+                        int crh = comp_h[idx_cr];
+                        int kw = comp_w[idx_k];
+                        int kh = comp_h[idx_k];
+
+                        int yy = y * yh / mcu_h;
+                        int yx = x * yw / mcu_w;
+                        int cby = y * cbh / mcu_h;
+                        int cbx = x * cbw / mcu_w;
+                        int cry = y * crh / mcu_h;
+                        int crx = x * crw / mcu_w;
+                        int ky = y * kh / mcu_h;
+                        int kx = x * kw / mcu_w;
+
+                        uint8_t k = comp_buf[idx_k][ky * kw + kx];
+                        if (adobe_transform == 2) {
+                            int Y = comp_buf[idx_y][yy * yw + yx];
+                            int Cb = comp_buf[idx_cb][cby * cbw + cbx] - 128;
+                            int Cr = comp_buf[idx_cr][cry * crw + crx] - 128;
+
+                            int rtmp = Y + ((91881 * Cr) >> 16);
+                            int gtmp = Y - ((22554 * Cb + 46802 * Cr) >> 16);
+                            int btmp = Y + ((116130 * Cb) >> 16);
+
+                            if (rtmp < 0) rtmp = 0;
+                            if (rtmp > 255) rtmp = 255;
+                            if (gtmp < 0) gtmp = 0;
+                            if (gtmp > 255) gtmp = 255;
+                            if (btmp < 0) btmp = 0;
+                            if (btmp > 255) btmp = 255;
+
+                            int r2 = rtmp - k;
+                            int g2 = gtmp - k;
+                            int b2 = btmp - k;
+                            if (r2 < 0) r2 = 0;
+                            if (g2 < 0) g2 = 0;
+                            if (b2 < 0) b2 = 0;
+                            r = (uint8_t)r2;
+                            g = (uint8_t)g2;
+                            b = (uint8_t)b2;
+                        } else {
+                            int c = comp_buf[idx_y][yy * yw + yx];
+                            int m = comp_buf[idx_cb][cby * cbw + cbx];
+                            int yv = comp_buf[idx_cr][cry * crw + crx];
+
+                            int r2 = 255 - (c + k);
+                            int g2 = 255 - (m + k);
+                            int b2 = 255 - (yv + k);
+                            if (r2 < 0) r2 = 0;
+                            if (g2 < 0) g2 = 0;
+                            if (b2 < 0) b2 = 0;
+                            if (r2 > 255) r2 = 255;
+                            if (g2 > 255) g2 = 255;
+                            if (b2 > 255) b2 = 255;
+                            r = (uint8_t)r2;
+                            g = (uint8_t)g2;
+                            b = (uint8_t)b2;
+                        }
                     }
 
                     size_t dst = ((size_t)out_y * (size_t)width + (size_t)out_x) * 4u;
@@ -883,6 +949,7 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
                             const jpeg_huff dc_tables[4],
                             const jpeg_huff ac_tables[4],
                             int restart_interval,
+                            int adobe_transform,
                             size_t *consumed,
                             cupidimage_image *out,
                             char *err, size_t errcap) {
@@ -919,9 +986,9 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
     int mcu_cols = (width + mcu_w - 1) / mcu_w;
     int mcu_rows = (height + mcu_h - 1) / mcu_h;
 
-    uint8_t comp_buf[3][16 * 16];
-    int comp_w[3] = {0, 0, 0};
-    int comp_h[3] = {0, 0, 0};
+    uint8_t comp_buf[4][16 * 16];
+    int comp_w[4] = {0, 0, 0, 0};
+    int comp_h[4] = {0, 0, 0, 0};
     for (int i = 0; i < num_comp; i++) {
         comp_w[i] = comps[i].h * 8;
         comp_h[i] = comps[i].v * 8;
@@ -930,10 +997,12 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
     int idx_y = 0;
     int idx_cb = (num_comp > 1) ? 1 : 0;
     int idx_cr = (num_comp > 2) ? 2 : 0;
+    int idx_k = (num_comp > 3) ? 3 : 0;
     for (int i = 0; i < num_comp; i++) {
         if (comps[i].id == 1) idx_y = i;
         if (comps[i].id == 2) idx_cb = i;
         if (comps[i].id == 3) idx_cr = i;
+        if (comps[i].id == 4) idx_k = i;
     }
 
     int32_t block[64];
@@ -990,7 +1059,7 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
                         r = yv;
                         g = yv;
                         b = yv;
-                    } else {
+                    } else if (num_comp == 3) {
                         int yw = comp_w[idx_y];
                         int yh = comp_h[idx_y];
                         int cbw = comp_w[idx_cb];
@@ -1023,6 +1092,69 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
                         r = (uint8_t)rtmp;
                         g = (uint8_t)gtmp;
                         b = (uint8_t)btmp;
+                    } else {
+                        int yw = comp_w[idx_y];
+                        int yh = comp_h[idx_y];
+                        int cbw = comp_w[idx_cb];
+                        int cbh = comp_h[idx_cb];
+                        int crw = comp_w[idx_cr];
+                        int crh = comp_h[idx_cr];
+                        int kw = comp_w[idx_k];
+                        int kh = comp_h[idx_k];
+
+                        int yy = y * yh / mcu_h;
+                        int yx = x * yw / mcu_w;
+                        int cby = y * cbh / mcu_h;
+                        int cbx = x * cbw / mcu_w;
+                        int cry = y * crh / mcu_h;
+                        int crx = x * crw / mcu_w;
+                        int ky = y * kh / mcu_h;
+                        int kx = x * kw / mcu_w;
+
+                        uint8_t k = comp_buf[idx_k][ky * kw + kx];
+                        if (adobe_transform == 2) {
+                            int Y = comp_buf[idx_y][yy * yw + yx];
+                            int Cb = comp_buf[idx_cb][cby * cbw + cbx] - 128;
+                            int Cr = comp_buf[idx_cr][cry * crw + crx] - 128;
+
+                            int rtmp = Y + ((91881 * Cr) >> 16);
+                            int gtmp = Y - ((22554 * Cb + 46802 * Cr) >> 16);
+                            int btmp = Y + ((116130 * Cb) >> 16);
+
+                            if (rtmp < 0) rtmp = 0;
+                            if (rtmp > 255) rtmp = 255;
+                            if (gtmp < 0) gtmp = 0;
+                            if (gtmp > 255) gtmp = 255;
+                            if (btmp < 0) btmp = 0;
+                            if (btmp > 255) btmp = 255;
+
+                            int r2 = rtmp - k;
+                            int g2 = gtmp - k;
+                            int b2 = btmp - k;
+                            if (r2 < 0) r2 = 0;
+                            if (g2 < 0) g2 = 0;
+                            if (b2 < 0) b2 = 0;
+                            r = (uint8_t)r2;
+                            g = (uint8_t)g2;
+                            b = (uint8_t)b2;
+                        } else {
+                            int c = comp_buf[idx_y][yy * yw + yx];
+                            int m = comp_buf[idx_cb][cby * cbw + cbx];
+                            int yv = comp_buf[idx_cr][cry * crw + crx];
+
+                            int r2 = 255 - (c + k);
+                            int g2 = 255 - (m + k);
+                            int b2 = 255 - (yv + k);
+                            if (r2 < 0) r2 = 0;
+                            if (g2 < 0) g2 = 0;
+                            if (b2 < 0) b2 = 0;
+                            if (r2 > 255) r2 = 255;
+                            if (g2 > 255) g2 = 255;
+                            if (b2 > 255) b2 = 255;
+                            r = (uint8_t)r2;
+                            g = (uint8_t)g2;
+                            b = (uint8_t)b2;
+                        }
                     }
 
                     size_t dst = ((size_t)out_y * (size_t)width + (size_t)out_x) * 4u;
@@ -1075,6 +1207,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
     int vmax = 0;
     int restart_interval = 0;
     int progressive = 0;
+    int adobe_transform = 0;
     int coeffs_allocated = 0;
     int mcu_cols = 0;
     int mcu_rows = 0;
@@ -1191,6 +1324,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                                       qtables,
                                       dc_tables, ac_tables,
                                       restart_interval,
+                                      adobe_transform,
                                       &consumed,
                                       out,
                                       err, errcap)) {
@@ -1316,6 +1450,13 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                 }
                 off += (size_t)count;
             }
+        } else if (marker == 0xEE) {
+            if (length >= 14) {
+                if (seg[0] == 'A' && seg[1] == 'd' && seg[2] == 'o' && seg[3] == 'b' && seg[4] == 'e') {
+                    adobe_transform = seg[11];
+                    JPEG_DEBUG("jpeg: Adobe APP14 transform=%d\n", adobe_transform);
+                }
+            }
         } else if (marker == 0xC2 || marker == 0xC0) {
             JPEG_DEBUG("jpeg: %s length=%u\n", marker == 0xC2 ? "SOF2" : "SOF0", length);
             if (length < 8) {
@@ -1331,7 +1472,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                 set_err(err, errcap, "only 8-bit JPEG supported");
                 goto fail;
             }
-            if (num_comp != 1 && num_comp != 3) {
+            if (num_comp != 1 && num_comp != 3 && num_comp != 4) {
                 set_err(err, errcap, "unsupported component count");
                 goto fail;
             }
@@ -1397,6 +1538,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                                      mcu_cols, mcu_rows,
                                      hmax, vmax,
                                      qtables,
+                                     adobe_transform,
                                      out,
                                      err, errcap)) {
             goto fail;

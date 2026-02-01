@@ -481,7 +481,7 @@ static int unfilter(const uint8_t *raw, size_t raw_size, uint8_t *recon, size_t 
 
 static int calc_rowbytes(uint32_t width, uint8_t color_type, uint8_t bit_depth, int channels,
                          size_t *rowbytes_out, int *bpp_out) {
-    if (color_type == 3) {
+    if (color_type == 3 || (color_type == 0 && bit_depth < 8)) {
         size_t bits_per_row = (size_t)width * (size_t)bit_depth;
         if (width > 0 && bits_per_row / (size_t)bit_depth != (size_t)width) {
             return 0;
@@ -505,6 +505,24 @@ static int calc_rowbytes(uint32_t width, uint8_t color_type, uint8_t bit_depth, 
 }
 
 static uint8_t palette_index_at(const uint8_t *row, uint32_t x, uint8_t bit_depth) {
+    if (bit_depth == 8) {
+        return row[x];
+    }
+    if (bit_depth == 4) {
+        uint8_t byte = row[x / 2u];
+        return (x % 2u == 0) ? (byte >> 4) : (byte & 0x0Fu);
+    }
+    if (bit_depth == 2) {
+        uint8_t byte = row[x / 4u];
+        unsigned shift = 6u - 2u * (x % 4u);
+        return (uint8_t)((byte >> shift) & 0x03u);
+    }
+    uint8_t byte = row[x / 8u];
+    unsigned shift = 7u - (x % 8u);
+    return (uint8_t)((byte >> shift) & 0x01u);
+}
+
+static uint8_t gray_sample_at(const uint8_t *row, uint32_t x, uint8_t bit_depth) {
     if (bit_depth == 8) {
         return row[x];
     }
@@ -650,10 +668,18 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
             set_err(err, errcap, "invalid tRNS");
             return 0;
         }
-    } else if (!(bit_depth == 8 || bit_depth == 16)) {
-        free(idat);
-        set_err(err, errcap, "only 8-bit or 16-bit PNG supported");
-        return 0;
+    } else if (color_type == 0) {
+        if (!(bit_depth == 1 || bit_depth == 2 || bit_depth == 4 || bit_depth == 8 || bit_depth == 16)) {
+            free(idat);
+            set_err(err, errcap, "unsupported grayscale bit depth");
+            return 0;
+        }
+    } else {
+        if (!(bit_depth == 8 || bit_depth == 16)) {
+            free(idat);
+            set_err(err, errcap, "only 8-bit or 16-bit PNG supported");
+            return 0;
+        }
     }
 
     int channels = 0;
@@ -733,23 +759,31 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
         for (uint32_t y = 0; y < height; y++) {
             const uint8_t *src = recon + (size_t)y * rowbytes;
             uint8_t *dst = rgba + (size_t)y * (size_t)width * 4u;
-            for (uint32_t x = 0; x < width; x++) {
-                if (color_type == 0) {
-                    if (bit_depth == 16) {
-                        size_t off = (size_t)x * 2u;
-                        uint16_t g16 = (uint16_t)((src[off] << 8) | src[off + 1]);
-                        uint8_t g = sample16_to_8(g16);
-                        dst[x * 4 + 0] = g;
-                        dst[x * 4 + 1] = g;
-                        dst[x * 4 + 2] = g;
-                        dst[x * 4 + 3] = 255;
-                    } else {
-                        uint8_t g = src[x];
-                        dst[x * 4 + 0] = g;
-                        dst[x * 4 + 1] = g;
-                        dst[x * 4 + 2] = g;
-                        dst[x * 4 + 3] = 255;
-                    }
+        for (uint32_t x = 0; x < width; x++) {
+            if (color_type == 0) {
+                if (bit_depth == 16) {
+                    size_t off = (size_t)x * 2u;
+                    uint16_t g16 = (uint16_t)((src[off] << 8) | src[off + 1]);
+                    uint8_t g = sample16_to_8(g16);
+                    dst[x * 4 + 0] = g;
+                    dst[x * 4 + 1] = g;
+                    dst[x * 4 + 2] = g;
+                    dst[x * 4 + 3] = 255;
+                } else if (bit_depth == 8) {
+                    uint8_t g = src[x];
+                    dst[x * 4 + 0] = g;
+                    dst[x * 4 + 1] = g;
+                    dst[x * 4 + 2] = g;
+                    dst[x * 4 + 3] = 255;
+                } else {
+                    uint8_t v = gray_sample_at(src, x, bit_depth);
+                    unsigned maxv = (1u << bit_depth) - 1u;
+                    uint8_t g = (uint8_t)((v * 255u + maxv / 2u) / maxv);
+                    dst[x * 4 + 0] = g;
+                    dst[x * 4 + 1] = g;
+                    dst[x * 4 + 2] = g;
+                    dst[x * 4 + 3] = 255;
+                }
                 } else if (color_type == 2) {
                     if (bit_depth == 16) {
                         size_t off = (size_t)x * 6u;
@@ -933,8 +967,16 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
                         dst[1] = g;
                         dst[2] = g;
                         dst[3] = 255;
-                    } else {
+                    } else if (bit_depth == 8) {
                         uint8_t g = src[x];
+                        dst[0] = g;
+                        dst[1] = g;
+                        dst[2] = g;
+                        dst[3] = 255;
+                    } else {
+                        uint8_t v = gray_sample_at(src, x, bit_depth);
+                        unsigned maxv = (1u << bit_depth) - 1u;
+                        uint8_t g = (uint8_t)((v * 255u + maxv / 2u) / maxv);
                         dst[0] = g;
                         dst[1] = g;
                         dst[2] = g;
