@@ -23,6 +23,10 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                          char *err, size_t errcap);
 int cupidimage_load_jpeg_file(const char *path, cupidimage_image *out,
                               char *err, size_t errcap);
+int cupidimage_load_webp(const unsigned char *data, size_t size, cupidimage_image *out,
+                         char *err, size_t errcap);
+int cupidimage_load_webp_file(const char *path, cupidimage_image *out,
+                              char *err, size_t errcap);
 int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_image *out,
                           char *err, size_t errcap);
 int cupidimage_load_image_file(const char *path, cupidimage_image *out,

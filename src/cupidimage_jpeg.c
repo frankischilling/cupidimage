@@ -1618,6 +1618,10 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
     if (size >= 8 && data[0] == 137 && data[1] == 80 && data[2] == 78 && data[3] == 71) {
         return cupidimage_load_png(data, size, out, err, errcap);
     }
+    if (size >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+        data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {
+        return cupidimage_load_webp(data, size, out, err, errcap);
+    }
     if (size >= 2 && data[0] == 0xFF && data[1] == 0xD8) {
         return cupidimage_load_jpeg(data, size, out, err, errcap);
     }
