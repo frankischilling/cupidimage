@@ -22,6 +22,13 @@ WebP status:
 Todo
 
 - [ ] For each image foramt provide option for checkerboard or white for alpha
+- [ ] GIF (Static or animated)
+- [ ] BMP
+- [ ] TIFF
+- [ ] ICO
+- [ ] HEIC / HEIF
+- [ ] SVG
+- [ ] PDF
 
 Build (static library):
 ```sh
