@@ -1062,6 +1062,26 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
 
 int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_image *out,
                          char *err, size_t errcap) {
+    jpeg_huff dc_tables[4] = {0};
+    jpeg_huff ac_tables[4] = {0};
+    int qtables[4][64];
+    int qvalid[4] = {0, 0, 0, 0};
+    jpeg_comp comps[3];
+    int num_comp = 0;
+    int width = 0;
+    int height = 0;
+    int precision = 0;
+    int hmax = 0;
+    int vmax = 0;
+    int restart_interval = 0;
+    int progressive = 0;
+    int coeffs_allocated = 0;
+    int mcu_cols = 0;
+    int mcu_rows = 0;
+    size_t pos = 2;
+    int saw_sof = 0;
+    int saw_sos = 0;
+
     if (!data || !out) {
         set_err(err, errcap, "invalid arguments");
         goto fail;
@@ -1074,27 +1094,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
         goto fail;
     }
 
-    jpeg_huff dc_tables[4] = {0};
-    jpeg_huff ac_tables[4] = {0};
-    int qtables[4][64];
-    int qvalid[4] = {0, 0, 0, 0};
-    jpeg_comp comps[3];
     memset(comps, 0, sizeof(comps));
-    int num_comp = 0;
-    int width = 0;
-    int height = 0;
-    int precision = 0;
-    int hmax = 0;
-    int vmax = 0;
-    int restart_interval = 0;
-    int progressive = 0;
-    int coeffs_allocated = 0;
-    int mcu_cols = 0;
-    int mcu_rows = 0;
-
-    size_t pos = 2;
-    int saw_sof = 0;
-    int saw_sos = 0;
 
     while (pos + 1 < size) {
         if (data[pos] != 0xFF) {
@@ -1250,7 +1250,8 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
         if (marker == 0xDB) {
             JPEG_DEBUG("jpeg: DQT length=%u\n", length);
             size_t off = 0;
-            while (off + 1 < length - 2) {
+            size_t seg_len = (size_t)length - 2u;
+            while (off + 1 < seg_len) {
                 uint8_t pq_tq = seg[off++];
                 int pq = (pq_tq >> 4) & 0x0F;
                 int tq = pq_tq & 0x0F;
@@ -1259,7 +1260,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                     goto fail;
                 }
                 if (pq == 0) {
-                    if (off + 64 > length - 2) {
+                    if (off + 64 > seg_len) {
                         set_err(err, errcap, "invalid quant table length");
                         goto fail;
                     }
@@ -1267,7 +1268,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                         qtables[tq][zigzag[i]] = seg[off++];
                     }
                 } else if (pq == 1) {
-                    if (off + 128 > length - 2) {
+                    if (off + 128 > seg_len) {
                         set_err(err, errcap, "invalid quant table length");
                         goto fail;
                     }
@@ -1285,7 +1286,8 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
         } else if (marker == 0xC4) {
             JPEG_DEBUG("jpeg: DHT length=%u\n", length);
             size_t off = 0;
-            while (off + 1 < length - 2) {
+            size_t seg_len = (size_t)length - 2u;
+            while (off + 1 < seg_len) {
                 uint8_t tc_th = seg[off++];
                 int tc = (tc_th >> 4) & 0x0F;
                 int th = tc_th & 0x0F;
@@ -1293,7 +1295,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                     set_err(err, errcap, "invalid huffman table");
                     goto fail;
                 }
-                if (off + 16 > length - 2) {
+                if (off + 16 > seg_len) {
                     set_err(err, errcap, "invalid huffman table length");
                     goto fail;
                 }
@@ -1303,7 +1305,7 @@ int cupidimage_load_jpeg(const unsigned char *data, size_t size, cupidimage_imag
                     bits[i] = seg[off++];
                     count += bits[i];
                 }
-                if (off + (size_t)count > length - 2) {
+                if (off + (size_t)count > seg_len) {
                     set_err(err, errcap, "invalid huffman table length");
                     goto fail;
                 }
