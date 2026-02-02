@@ -1,4 +1,4 @@
-cupidimage is a tiny, dependency-free C library for rendering PNG, JPEG, WebP, GIF, BMP, ICO/CUR, and TIFF images in a terminal using ANSI 24-bit colors.
+cupidimage is a dependency-free C99 library for decoding common image formats and rendering them in a terminal using ANSI 24-bit color. It also ships with a small CLI for quick previews.
 
 Supported PNG features:
 - PNG (RFC 2083), non-interlaced and Adam7 interlaced
