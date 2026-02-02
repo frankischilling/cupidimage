@@ -158,9 +158,11 @@ static int ico_parse_directory(const unsigned char *data, size_t size,
         }
 
         entries[i] = entry;
+#ifdef CUPIDIMAGE_ICO_DEBUG
         uint32_t w = entry.width ? entry.width : 256u;
         uint32_t h = entry.height ? entry.height : 256u;
         ICO_DEBUG("entry %u: %ux%u size=%u offset=%u\n", i, w, h, entry.size, entry.offset);
+#endif
     }
 
     *entries_out = entries;

@@ -76,6 +76,7 @@ static uint8_t bmp_mask_extract(uint32_t value, const bmp_mask_info *mi) {
     return (uint8_t)((v * 255u + maxv / 2u) / maxv);
 }
 
+#ifdef CUPIDIMAGE_BMP_DEBUG
 static const char *bmp_header_name(uint32_t size) {
     switch (size) {
         case 12: return "BITMAPCOREHEADER";
@@ -100,6 +101,7 @@ static const char *bmp_compression_name(uint32_t comp) {
         default: return "UNKNOWN";
     }
 }
+#endif
 
 static int bmp_decode_rle8(const uint8_t *src, size_t size,
                            uint32_t width, uint32_t height, int top_down,
@@ -436,11 +438,15 @@ int cupidimage_load_bmp(const unsigned char *data, size_t size,
         }
         if (dib_size >= 108) {
             cstype = read_le32(dib + 56);
+            (void)cstype;
         }
         if (dib_size >= 124) {
             intent = read_le32(dib + 108);
             profile_data = read_le32(dib + 112);
             profile_size = read_le32(dib + 116);
+            (void)intent;
+            (void)profile_data;
+            (void)profile_size;
         }
     }
 

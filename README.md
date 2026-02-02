@@ -1,62 +1,13 @@
 cupidimage is a dependency-free C99 library for decoding common image formats and rendering them in a terminal using ANSI 24-bit color. It also ships with a small CLI for quick previews.
 
-Supported PNG features:
-- PNG (RFC 2083), non-interlaced and Adam7 interlaced
-- Color types: grayscale (0), RGB (2), grayscale+alpha (4), RGBA (6) at 8-bit or 16-bit depth
-- Indexed-color (palette) PNGs (color type 3) with bit depths 1/2/4/8 and tRNS alpha
-
-Supported JPEG features:
-- JPEG (ISO/IEC 10918-1) baseline or progressive DCT, Huffman-coded, 8-bit precision
-- Grayscale, YCbCr (3-component), and CMYK/YCCK (4-component) images
-- Sampling factors up to 2x2 (e.g., 4:2:0, 4:2:2, 4:4:4)
-- Uses the standard JPEG Huffman tables (Annex K) if a file omits DHT segments
-
-Not supported: arithmetic coding or sampling factors above 2x2.
-
-WebP status:
-- VP8 lossy keyframe decode (single-partition streams only) with loop filter.
-- VP8X container support for still images and VP8L lossless decode with transforms/color cache.
-- ALPH chunk method 0 (raw alpha) supported for VP8.
-- Not supported (priority order): animations, interframes, multi-partition streams, ALPH filtering/preprocessing, ICC/EXIF/XMP.
-
-GIF status:
-- GIF87a/GIF89a single-frame decode and animated GIF composition.
-- Global/local palettes, interlacing, transparency, and disposal methods 0-3 (4-7 treated as no-dispose).
-- Netscape/ANIMEXTS loop counts honored for animation playback.
-- Pixel aspect ratio and color resolution parsed and exposed in animation metadata.
-- Graphic Control Extension user-input flags captured per frame.
-- Delay=0 honored as "no delay" (no clamping).
-
-BMP status:
-- Windows BMP (all versions) and OS/2 BMP support
-- Compression: BI_RGB (uncompressed), BI_RLE8, BI_RLE4, BI_BITFIELDS, BI_JPEG, BI_PNG
-- Bit depths: 1-bit (monochrome), 4-bit/8-bit (indexed), 16-bit/24-bit/32-bit (RGB/RGBA)
-- Headers: BITMAPCOREHEADER (OS/2), BITMAPINFOHEADER, V2/V3/V4/V5
-- Top-down and bottom-up orientation support
-- Auto-conversion of pre-multiplied alpha to straight alpha
-
-ICO/CUR status:
-- Directory enumeration API with page-based decode
-- PNG-compressed icons and DIB-based icons at 1/4/8/24/32-bit
-- AND mask transparency handling and CUR hotspots exposed in `cupidimage_image`
-
-TIFF status:
-- Classic TIFF and BigTIFF with II/MM byte orders
-- Compression: none, LZW, PackBits, Deflate/ZIP (8/32946), JPEG-in-TIFF (7), CCITT RLE/G3/G4
-- Photometric: bilevel, grayscale(+alpha), RGB/RGBA, palette/indexed, CMYK, YCbCr, CIE L*a*b*
-- Bit depths: 1-32-bit integer (packed supported for chunky); 32/64-bit float (SampleFormat=3, scaled to 8-bit)
-- Strips and tiles, planar configuration 1 (chunky) and 2 (separate)
-- Predictor=2 (horizontal differencing) for 8/16-bit samples
-- Orientation 1-8 supported
-- Multi-page IFDs with SubIFD pages via page APIs
-- Notes: JPEG-in-TIFF strips only; YCbCr subsampling supported for strip-based 8-bit chunky data
-
-Todo
-
-- [ ] For each image foramt provide option for checkerboard or white for alpha
-- [ ] HEIC / HEIF
-- [ ] SVG
-- [ ] PDF
+Supported formats (decoder status):
+- PNG: non-interlaced and Adam7; color types 0/2/3/4/6 with 1/2/4/8/16-bit depths; palette + tRNS.
+- JPEG: baseline/progressive DCT, Huffman-coded, 8-bit precision; grayscale/YCbCr/CMYK/YCCK; sampling up to 2x2. No arithmetic coding or >2x2 sampling.
+- WebP: VP8 lossy keyframes; VP8X still images; VP8L lossless with transforms/color cache; ALPH chunk method 0. No animation or interframes.
+- GIF: single-frame decode and animated GIF composition; palettes, interlacing, transparency; disposal methods 0-3; loop counts and per-frame delays.
+- BMP: Windows/OS/2; BI_RGB/BI_RLE8/BI_RLE4/BI_BITFIELDS/BI_JPEG/BI_PNG; 1/4/8/16/24/32-bit; top-down/bottom-up; pre-multiplied alpha conversion.
+- ICO/CUR: directory enumeration + page-based decode; PNG-compressed and DIB icons at 1/4/8/24/32-bit; AND mask transparency; CUR hotspots.
+- TIFF: Classic + BigTIFF; byte orders II/MM; compression none/LZW/PackBits/Deflate/JPEG/CCITT RLE/G3/G4; photometric bilevel/grayscale(+alpha)/RGB/RGBA/palette/CMYK/YCbCr/Lab; strips/tiles; planar 1/2; predictor=2; orientation 1-8; multi-page IFDs (SubIFD pages via page APIs).
 
 Build (Makefile):
 ```sh
@@ -79,6 +30,7 @@ sudo install -m 644 src/cupidimage.h /usr/local/include/
 Build (manual, static library):
 ```sh
 cc -Isrc -c src/cupidimage.c -o obj/cupidimage.o
+cc -Isrc -c src/cupidimage_png.c -o obj/cupidimage_png.o
 cc -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
 cc -Isrc -c src/cupidimage_webp.c -o obj/cupidimage_webp.o
 cc -Isrc -c src/cupidimage_webp_tables.c -o obj/cupidimage_webp_tables.o
@@ -87,30 +39,15 @@ cc -Isrc -c src/cupidimage_gif.c -o obj/cupidimage_gif.o
 cc -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
 cc -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 cc -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o
-```
-
-Enable JPEG debug logging:
-```sh
-cc -DCUPIDIMAGE_JPEG_DEBUG -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
-```
-
-Enable BMP debug logging:
-```sh
-cc -DCUPIDIMAGE_BMP_DEBUG -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
-```
-
-Enable TIFF debug logging:
-```sh
-cc -DCUPIDIMAGE_TIFF_DEBUG -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o
 ```
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
 ```
 
-Run:
+Use the CLI:
 ```sh
 ./bin/cupidimage test.png 120 60
 ./bin/cupidimage test.jpg 120 60
@@ -120,16 +57,6 @@ Run:
 Link in your app (static library):
 ```sh
 cc -Isrc your_app.c -L/usr/local/lib -lcupidimage -o your_app
-```
-
-Quick BMP smoke test (expects failures for invalid samples):
-```sh
-scripts/test_bmp_assets.sh
-```
-
-Quick ICO/CUR smoke test (expects failures for invalid samples):
-```sh
-scripts/test_ico_assets.sh
 ```
 
 Example usage:
@@ -149,3 +76,57 @@ int main(int argc, char **argv) {
     return 0;
 }
 ```
+
+GIF animation usage:
+```c
+cupidimage_animation anim;
+if (!cupidimage_load_gif_animation_file("anim.gif", &anim, err, sizeof(err))) {
+    fprintf(stderr, "load error: %s\n", err);
+    return 1;
+}
+/* render anim.frames[i] with anim.delays[i] */
+cupidimage_free_animation(&anim);
+```
+
+TIFF page APIs:
+```c
+int count = 0;
+if (cupidimage_get_tiff_page_count(data, size, &count, err, sizeof(err))) {
+    cupidimage_load_tiff_page(data, size, &img, 0, err, sizeof(err));
+}
+```
+
+ICO/CUR directory APIs:
+```c
+cupidimage_ico_entry *entries = NULL;
+int count = 0;
+int is_cursor = 0;
+if (cupidimage_ico_get_directory("icons.ico", &entries, &count, &is_cursor, err, sizeof(err))) {
+    cupidimage_load_ico_page("icons.ico", 0, &img, err, sizeof(err));
+    free(entries);
+}
+```
+
+Debug logging:
+```sh
+cc -DCUPIDIMAGE_JPEG_DEBUG -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
+cc -DCUPIDIMAGE_BMP_DEBUG -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
+cc -DCUPIDIMAGE_TIFF_DEBUG -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
+cc -DCUPIDIMAGE_ICO_DEBUG -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
+```
+
+Quick BMP smoke test (expects failures for invalid samples):
+```sh
+scripts/test_bmp_assets.sh
+```
+
+Quick ICO/CUR smoke test (expects failures for invalid samples):
+```sh
+scripts/test_ico_assets.sh
+```
+
+Todo
+- [ ] For each image format provide option for checkerboard or white for alpha
+- [ ] HEIC / HEIF
+- [ ] SVG
+- [ ] PDF

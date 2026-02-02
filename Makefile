@@ -7,7 +7,7 @@ OBJDIR = obj
 BINDIR = bin
 SRCDIR = src
 
-LIBOBJ = $(OBJDIR)/cupidimage.o $(OBJDIR)/cupidimage_jpeg.o $(OBJDIR)/cupidimage_webp.o $(OBJDIR)/cupidimage_webp_tables.o $(OBJDIR)/cupidimage_webp_lossless.o $(OBJDIR)/cupidimage_gif.o $(OBJDIR)/cupidimage_bmp.o $(OBJDIR)/cupidimage_ico.o $(OBJDIR)/cupidimage_tiff.o
+LIBOBJ = $(OBJDIR)/cupidimage.o $(OBJDIR)/cupidimage_png.o $(OBJDIR)/cupidimage_jpeg.o $(OBJDIR)/cupidimage_webp.o $(OBJDIR)/cupidimage_webp_tables.o $(OBJDIR)/cupidimage_webp_lossless.o $(OBJDIR)/cupidimage_gif.o $(OBJDIR)/cupidimage_bmp.o $(OBJDIR)/cupidimage_ico.o $(OBJDIR)/cupidimage_tiff.o
 LIB = $(BINDIR)/libcupidimage.a
 CLI = $(BINDIR)/cupidimage
 
@@ -23,7 +23,7 @@ $(LIB): $(LIBOBJ)
 	@mkdir -p $(BINDIR)
 	$(AR) rcs $@ $(LIBOBJ)
 
-$(CLI): $(SRCDIR)/cupidimage.c $(SRCDIR)/cupidimage_jpeg.c $(SRCDIR)/cupidimage_webp.c $(SRCDIR)/cupidimage_webp_tables.c $(SRCDIR)/cupidimage_webp_lossless.c $(SRCDIR)/cupidimage_gif.c $(SRCDIR)/cupidimage_bmp.c $(SRCDIR)/cupidimage_ico.c $(SRCDIR)/cupidimage_tiff.c $(SRCDIR)/cupidimage_cli.c | $(BINDIR)
+$(CLI): $(SRCDIR)/cupidimage.c $(SRCDIR)/cupidimage_png.c $(SRCDIR)/cupidimage_jpeg.c $(SRCDIR)/cupidimage_webp.c $(SRCDIR)/cupidimage_webp_tables.c $(SRCDIR)/cupidimage_webp_lossless.c $(SRCDIR)/cupidimage_gif.c $(SRCDIR)/cupidimage_bmp.c $(SRCDIR)/cupidimage_ico.c $(SRCDIR)/cupidimage_tiff.c $(SRCDIR)/cupidimage_cli.c | $(BINDIR)
 	$(CC) $(CFLAGS) $(INCLUDES) $^ -o $@
 
 $(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
