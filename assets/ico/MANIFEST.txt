@@ -1,0 +1,12 @@
+cursor-hotspot.cur
+edge-256-dir-zero.ico
+edge-mismatched-metadata.ico
+invalid-bad-magic.ico
+invalid-truncated.ico
+invalid-wrong-type.ico
+invalid-zero-count.ico
+legacy-1bit-4bit-8bit.ico
+multi-16-32-48-256.ico
+png-compressed-256.ico
+rgb24-with-andmask.ico
+simple-32x32-rgba.ico
