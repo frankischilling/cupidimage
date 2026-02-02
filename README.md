@@ -58,7 +58,25 @@ Todo
 - [ ] SVG
 - [ ] PDF
 
-Build (static library):
+Build (Makefile):
+```sh
+make
+```
+
+Build just the static library or CLI:
+```sh
+make lib
+make cli
+```
+
+Install (static library + header):
+```sh
+sudo install -d /usr/local/lib /usr/local/include
+sudo install -m 644 bin/libcupidimage.a /usr/local/lib/
+sudo install -m 644 src/cupidimage.h /usr/local/include/
+```
+
+Build (manual, static library):
 ```sh
 cc -Isrc -c src/cupidimage.c -o obj/cupidimage.o
 cc -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg.o
@@ -97,6 +115,11 @@ Run:
 ./bin/cupidimage test.png 120 60
 ./bin/cupidimage test.jpg 120 60
 ./bin/cupidimage test.webp 120 60
+```
+
+Link in your app (static library):
+```sh
+cc -Isrc your_app.c -L/usr/local/lib -lcupidimage -o your_app
 ```
 
 Quick BMP smoke test (expects failures for invalid samples):
