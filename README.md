@@ -14,6 +14,13 @@ Build (Makefile):
 make
 ```
 
+Build via script:
+```sh
+scripts/make.sh
+scripts/make.sh lib
+scripts/make.sh cli
+```
+
 Build just the static library or CLI:
 ```sh
 make lib
@@ -25,6 +32,13 @@ Install (static library + header):
 sudo install -d /usr/local/lib /usr/local/include
 sudo install -m 644 bin/libcupidimage.a /usr/local/lib/
 sudo install -m 644 src/cupidimage.h /usr/local/include/
+```
+
+Install via script (supports uninstall):
+```sh
+scripts/install.sh
+PREFIX=/usr/local scripts/install.sh
+PREFIX=/usr/local scripts/install.sh --uninstall
 ```
 
 Build (manual, static library):
