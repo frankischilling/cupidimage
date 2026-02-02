@@ -1114,6 +1114,8 @@ void cupidimage_free(cupidimage_image *img) {
     img->rgba = NULL;
     img->width = 0;
     img->height = 0;
+    img->hotspot_x = 0;
+    img->hotspot_y = 0;
 }
 
 static void write_ansi_bg(FILE *out, uint8_t r, uint8_t g, uint8_t b) {

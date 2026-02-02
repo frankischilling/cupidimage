@@ -1,4 +1,4 @@
-cupidimage is a tiny, dependency-free C library for rendering PNG, JPEG, WebP, GIF, BMP, and TIFF images in a terminal using ANSI 24-bit colors.
+cupidimage is a tiny, dependency-free C library for rendering PNG, JPEG, WebP, GIF, BMP, ICO/CUR, and TIFF images in a terminal using ANSI 24-bit colors.
 
 Supported PNG features:
 - PNG (RFC 2083), non-interlaced and Adam7 interlaced
@@ -35,6 +35,11 @@ BMP status:
 - Top-down and bottom-up orientation support
 - Auto-conversion of pre-multiplied alpha to straight alpha
 
+ICO/CUR status:
+- Directory enumeration API with page-based decode
+- PNG-compressed icons and DIB-based icons at 1/4/8/24/32-bit
+- AND mask transparency handling and CUR hotspots exposed in `cupidimage_image`
+
 TIFF status:
 - Classic TIFF and BigTIFF with II/MM byte orders
 - Compression: none, LZW, PackBits, Deflate/ZIP (8/32946), JPEG-in-TIFF (7), CCITT RLE/G3/G4
@@ -49,7 +54,6 @@ TIFF status:
 Todo
 
 - [ ] For each image foramt provide option for checkerboard or white for alpha
-- [ ] ICO
 - [ ] HEIC / HEIF
 - [ ] SVG
 - [ ] PDF
@@ -63,8 +67,9 @@ cc -Isrc -c src/cupidimage_webp_tables.c -o obj/cupidimage_webp_tables.o
 cc -Isrc -c src/cupidimage_webp_lossless.c -o obj/cupidimage_webp_lossless.o
 cc -Isrc -c src/cupidimage_gif.c -o obj/cupidimage_gif.o
 cc -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
+cc -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 cc -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_tiff.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o
 ```
 
 Enable JPEG debug logging:
@@ -84,7 +89,7 @@ cc -DCUPIDIMAGE_TIFF_DEBUG -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
 ```
 
 Run:
@@ -97,6 +102,11 @@ Run:
 Quick BMP smoke test (expects failures for invalid samples):
 ```sh
 scripts/test_bmp_assets.sh
+```
+
+Quick ICO/CUR smoke test (expects failures for invalid samples):
+```sh
+scripts/test_ico_assets.sh
 ```
 
 Example usage:

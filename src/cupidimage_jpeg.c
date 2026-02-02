@@ -1615,6 +1615,10 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
         set_err(err, errcap, "invalid arguments");
         return 0;
     }
+    if (size >= 4 && data[0] == 0 && data[1] == 0 &&
+        (data[2] == 1 || data[2] == 2) && data[3] == 0) {
+        return cupidimage_load_ico(data, size, out, err, errcap);
+    }
     if (size >= 8 && data[0] == 137 && data[1] == 80 && data[2] == 78 && data[3] == 71) {
         return cupidimage_load_png(data, size, out, err, errcap);
     }
