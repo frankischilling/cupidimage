@@ -8,6 +8,7 @@ Supported formats (decoder status):
 - BMP: Windows/OS/2; BI_RGB/BI_RLE8/BI_RLE4/BI_BITFIELDS/BI_JPEG/BI_PNG; 1/4/8/16/24/32-bit; top-down/bottom-up; pre-multiplied alpha conversion.
 - ICO/CUR: directory enumeration + page-based decode; PNG-compressed and DIB icons at 1/4/8/24/32-bit; AND mask transparency; CUR hotspots.
 - TIFF: Classic + BigTIFF; byte orders II/MM; compression none/LZW/PackBits/Deflate/JPEG/CCITT RLE/G3/G4; photometric bilevel/grayscale(+alpha)/RGB/RGBA/palette/CMYK/YCbCr/Lab; strips/tiles; planar 1/2; predictor=2; orientation 1-8; multi-page IFDs (SubIFD pages via page APIs).
+- HEIC/HEIF: HEVC (H.265) intra frames; grid images (tiled); VUI color space (BT.601/BT.709/BT.2020); full/limited range YUV; 4:2:0 chroma subsampling. Graceful bitstream boundary handling for partial tiles.
 
 Build (Makefile):
 ```sh
@@ -58,7 +59,7 @@ ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_heif.c src/cupidimage_cli.c -o bin/cupidimage
 ```
 
 Use the CLI:
@@ -66,6 +67,7 @@ Use the CLI:
 ./bin/cupidimage test.png 120 60
 ./bin/cupidimage test.jpg 120 60
 ./bin/cupidimage test.webp 120 60
+./bin/cupidimage test.heic 80 40
 ```
 
 Link in your app (static library):
@@ -129,6 +131,11 @@ cc -DCUPIDIMAGE_TIFF_DEBUG -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff
 cc -DCUPIDIMAGE_ICO_DEBUG -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 ```
 
+HEIC debug (runtime environment variable):
+```sh
+CUPIDIMAGE_HEIF_DEBUG=1 ./bin/cupidimage test.heic 80 40
+```
+
 Quick BMP smoke test (expects failures for invalid samples):
 ```sh
 scripts/test_bmp_assets.sh
@@ -141,6 +148,7 @@ scripts/test_ico_assets.sh
 
 Todo
 - [ ] For each image format provide option for checkerboard or white for alpha
-- [ ] HEIC / HEIF
+- [ ] TGA
 - [ ] SVG
 - [ ] PDF
+- [ ] HEIC / HEIF
