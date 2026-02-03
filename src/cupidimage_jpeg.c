@@ -20,6 +20,66 @@ static uint16_t read_be16(const unsigned char *p) {
     return (uint16_t)((p[0] << 8) | p[1]);
 }
 
+static uint32_t read_be32(const unsigned char *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint64_t read_be64(const unsigned char *p) {
+    return ((uint64_t)read_be32(p) << 32) | (uint64_t)read_be32(p + 4);
+}
+
+static int is_heif_brand(uint32_t brand) {
+    switch (brand) {
+        case 0x68656963u: /* heic */
+        case 0x68656978u: /* heix */
+        case 0x68657663u: /* hevc */
+        case 0x68657678u: /* hevx */
+        case 0x6d696631u: /* mif1 */
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int is_heif_ftyp(const unsigned char *buf, size_t len) {
+    if (len < 12) {
+        return 0;
+    }
+    uint32_t small_size = read_be32(buf);
+    uint32_t type = read_be32(buf + 4);
+    if (type != 0x66747970u) { /* ftyp */
+        return 0;
+    }
+    uint64_t box_size = small_size;
+    size_t header_size = 8;
+    if (small_size == 1) {
+        if (len < 16) {
+            return 0;
+        }
+        box_size = read_be64(buf + 8);
+        header_size = 16;
+    } else if (small_size == 0) {
+        box_size = len;
+    }
+    if (box_size < header_size + 8 || box_size > len) {
+        return 0;
+    }
+    const unsigned char *payload = buf + header_size;
+    size_t payload_size = (size_t)box_size - header_size;
+    uint32_t major = read_be32(payload);
+    if (is_heif_brand(major)) {
+        return 1;
+    }
+    size_t pos = 8;
+    while (pos + 4 <= payload_size) {
+        if (is_heif_brand(read_be32(payload + pos))) {
+            return 1;
+        }
+        pos += 4;
+    }
+    return 0;
+}
+
 typedef struct jpeg_huff {
     uint8_t bits[16];
     uint8_t huffval[256];
@@ -1637,6 +1697,9 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
     if (size >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
         data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {
         return cupidimage_load_webp(data, size, out, err, errcap);
+    }
+    if (is_heif_ftyp(data, size)) {
+        return cupidimage_load_heif(data, size, out, err, errcap);
     }
     if (size >= 2 && data[0] == 0xFF && data[1] == 0xD8) {
         return cupidimage_load_jpeg(data, size, out, err, errcap);

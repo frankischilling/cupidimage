@@ -6,9 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
 
 static void usage(const char *prog) {
-    fprintf(stderr, "usage: %s <image-file> [max_width] [max_height]\n", prog);
+    fprintf(stderr, "usage: %s [--fit|-f] <image-file> [max_width] [max_height]\n", prog);
 }
 
 static int is_gif_file(const char *path) {
@@ -38,19 +40,55 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    const char *path = NULL;
     int maxw = 0;
     int maxh = 0;
-    if (argc >= 3) {
-        maxw = atoi(argv[2]);
+    int fit = 0;
+    for (int i = 1; i < argc; i++) {
+        const char *arg = argv[i];
+        if (strcmp(arg, "--fit") == 0 || strcmp(arg, "-f") == 0) {
+            fit = 1;
+            continue;
+        }
+        if (!path) {
+            path = arg;
+            continue;
+        }
+        if (maxw == 0) {
+            maxw = atoi(arg);
+            continue;
+        }
+        if (maxh == 0) {
+            maxh = atoi(arg);
+            continue;
+        }
+        usage(argv[0]);
+        return 1;
     }
-    if (argc >= 4) {
-        maxh = atoi(argv[3]);
+    if (!path) {
+        usage(argv[0]);
+        return 1;
+    }
+    if (fit && isatty(STDOUT_FILENO)) {
+        struct winsize ws;
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0) {
+            if (maxw == 0 && ws.ws_col > 0) {
+                maxw = (int)ws.ws_col;
+            }
+            if (maxh == 0 && ws.ws_row > 0) {
+                int rows = (int)ws.ws_row;
+                if (rows > 1) {
+                    rows -= 1;
+                }
+                maxh = rows;
+            }
+        }
     }
 
     char err[128];
-    if (is_gif_file(argv[1])) {
+    if (is_gif_file(path)) {
         cupidimage_animation anim;
-        if (!cupidimage_load_gif_animation_file(argv[1], &anim, err, sizeof(err))) {
+        if (!cupidimage_load_gif_animation_file(path, &anim, err, sizeof(err))) {
             fprintf(stderr, "load error: %s\n", err);
             return 1;
         }
@@ -93,7 +131,7 @@ int main(int argc, char **argv) {
     }
 
     cupidimage_image img;
-    if (!cupidimage_load_image_file(argv[1], &img, err, sizeof(err))) {
+    if (!cupidimage_load_image_file(path, &img, err, sizeof(err))) {
         fprintf(stderr, "load error: %s\n", err);
         return 1;
     }

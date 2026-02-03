@@ -83,6 +83,20 @@ int cupidimage_load_tiff_page(const unsigned char *data, size_t size,
 int cupidimage_get_tiff_page_count(const unsigned char *data, size_t size,
                                    int *count,
                                    char *err, size_t errcap);
+int cupidimage_load_heif(const unsigned char *data, size_t size, cupidimage_image *out,
+                         char *err, size_t errcap);
+int cupidimage_load_heif_file(const char *path, cupidimage_image *out,
+                              char *err, size_t errcap);
+int cupidimage_heif_get_item_count(const unsigned char *data, size_t size,
+                                   int *count, char *err, size_t errcap);
+int cupidimage_load_heif_item(const unsigned char *data, size_t size,
+                              cupidimage_image *out, int item_index,
+                              char *err, size_t errcap);
+int cupidimage_load_heif_depth(const unsigned char *data, size_t size,
+                               cupidimage_image *out, char *err, size_t errcap);
+int cupidimage_load_heif_sequence(const unsigned char *data, size_t size,
+                                  cupidimage_animation *out,
+                                  char *err, size_t errcap);
 int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
                                   cupidimage_animation *out,
                                   char *err, size_t errcap);
