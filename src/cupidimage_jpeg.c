@@ -1615,9 +1615,12 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
         set_err(err, errcap, "invalid arguments");
         return 0;
     }
-    if (size >= 4 && data[0] == 0 && data[1] == 0 &&
+    if (size >= 6 && data[0] == 0 && data[1] == 0 &&
         (data[2] == 1 || data[2] == 2) && data[3] == 0) {
-        return cupidimage_load_ico(data, size, out, err, errcap);
+        uint16_t count = (uint16_t)(data[4] | (data[5] << 8));
+        if (count > 0 && 6u + (size_t)count * 16u <= size) {
+            return cupidimage_load_ico(data, size, out, err, errcap);
+        }
     }
     if (size >= 8 && data[0] == 137 && data[1] == 80 && data[2] == 78 && data[3] == 71) {
         return cupidimage_load_png(data, size, out, err, errcap);
@@ -1633,6 +1636,25 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
          (data[0] == 'I' && data[1] == 'I' && data[2] == 43 && data[3] == 0) ||
          (data[0] == 'M' && data[1] == 'M' && data[2] == 0 && (data[3] == 42 || data[3] == 43)))) {
         return cupidimage_load_tiff(data, size, out, err, errcap);
+    }
+    if (size >= 26) {
+        const unsigned char *footer = data + size - 26;
+        if (memcmp(footer + 8, "TRUEVISION-XFILE.\0", 18) == 0) {
+            return cupidimage_load_tga(data, size, out, err, errcap);
+        }
+    }
+    if (size >= 18) {
+        uint8_t color_map_type = data[1];
+        uint8_t type = data[2];
+        uint16_t width = (uint16_t)(data[12] | (data[13] << 8));
+        uint16_t height = (uint16_t)(data[14] | (data[15] << 8));
+        uint8_t depth = data[16];
+        int depth_ok = (depth == 0 || depth == 8 || depth == 15 || depth == 16 || depth == 24 || depth == 32);
+        if (color_map_type <= 1 && type <= 11 && depth_ok) {
+            if (type == 0 || (width > 0 && height > 0)) {
+                return cupidimage_load_tga(data, size, out, err, errcap);
+            }
+        }
     }
     if (size >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
         data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {

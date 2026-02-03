@@ -8,6 +8,7 @@ Supported formats (decoder status):
 - BMP: Windows/OS/2; BI_RGB/BI_RLE8/BI_RLE4/BI_BITFIELDS/BI_JPEG/BI_PNG; 1/4/8/16/24/32-bit; top-down/bottom-up; pre-multiplied alpha conversion.
 - ICO/CUR: directory enumeration + page-based decode; PNG-compressed and DIB icons at 1/4/8/24/32-bit; AND mask transparency; CUR hotspots.
 - TIFF: Classic + BigTIFF; byte orders II/MM; compression none/LZW/PackBits/Deflate/JPEG/CCITT RLE/G3/G4; photometric bilevel/grayscale(+alpha)/RGB/RGBA/palette/CMYK/YCbCr/Lab; strips/tiles; planar 1/2; predictor=2; orientation 1-8; multi-page IFDs (SubIFD pages via page APIs).
+- TGA: types 0-3/9-11; uncompressed/RLE; 8/15/16/24/32-bit; all origins; color-mapped/RGB/grayscale; TGA 2.0 metadata + thumbnail + gamma/color correction.
 
 Build (Makefile):
 ```sh
@@ -53,12 +54,13 @@ cc -Isrc -c src/cupidimage_gif.c -o obj/cupidimage_gif.o
 cc -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
 cc -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 cc -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o
+cc -Isrc -c src/cupidimage_tga.c -o obj/cupidimage_tga.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o obj/cupidimage_tga.o
 ```
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_cli.c -o bin/cupidimage
+cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_tga.c src/cupidimage_cli.c -o bin/cupidimage -lm
 ```
 
 Use the CLI:
@@ -66,11 +68,12 @@ Use the CLI:
 ./bin/cupidimage test.png 120 60
 ./bin/cupidimage test.jpg 120 60
 ./bin/cupidimage test.webp 120 60
+./bin/cupidimage --fit test.png
 ```
 
 Link in your app (static library):
 ```sh
-cc -Isrc your_app.c -L/usr/local/lib -lcupidimage -o your_app
+cc -Isrc your_app.c -L/usr/local/lib -lcupidimage -lm -o your_app
 ```
 
 Example usage:
@@ -110,6 +113,15 @@ if (cupidimage_get_tiff_page_count(data, size, &count, err, sizeof(err))) {
 }
 ```
 
+TGA metadata APIs:
+```c
+cupidimage_tga_metadata meta;
+if (cupidimage_load_tga_with_metadata(data, size, &img, &meta, 1, err, sizeof(err))) {
+    /* use img + meta */
+    cupidimage_free_tga_metadata(&meta);
+}
+```
+
 ICO/CUR directory APIs:
 ```c
 cupidimage_ico_entry *entries = NULL;
@@ -127,6 +139,7 @@ cc -DCUPIDIMAGE_JPEG_DEBUG -Isrc -c src/cupidimage_jpeg.c -o obj/cupidimage_jpeg
 cc -DCUPIDIMAGE_BMP_DEBUG -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
 cc -DCUPIDIMAGE_TIFF_DEBUG -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
 cc -DCUPIDIMAGE_ICO_DEBUG -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
+cc -DCUPIDIMAGE_TGA_DEBUG -Isrc -c src/cupidimage_tga.c -o obj/cupidimage_tga.o
 ```
 
 Quick BMP smoke test (expects failures for invalid samples):
@@ -139,10 +152,14 @@ Quick ICO/CUR smoke test (expects failures for invalid samples):
 scripts/test_ico_assets.sh
 ```
 
+Quick TGA smoke test (expects failures for invalid samples):
+```sh
+scripts/test_tga_assets.sh
+```
+
 
 Todo
 - [ ] For each image format provide option for checkerboard or white for alpha
-- [ ] TGA
 - [ ] SVG
 - [ ] PDF
 - [ ] HEIC / HEIF

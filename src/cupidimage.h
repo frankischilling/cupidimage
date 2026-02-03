@@ -40,6 +40,29 @@ typedef struct cupidimage_ico_entry {
     uint32_t offset;
 } cupidimage_ico_entry;
 
+typedef struct cupidimage_tga_metadata {
+    char author[41];
+    char comments[324];
+    uint16_t timestamp[6];
+    char job_id[41];
+    uint16_t job_time[3];
+    char software_id[41];
+    uint16_t software_version_number;
+    uint8_t software_version_letter;
+    uint32_t key_color;
+    uint16_t pixel_aspect_ratio_numerator;
+    uint16_t pixel_aspect_ratio_denominator;
+    uint16_t gamma_numerator;
+    uint16_t gamma_denominator;
+    uint32_t color_correction_offset;
+    uint32_t postage_stamp_offset;
+    uint32_t scan_line_offset;
+    uint8_t attributes_type;
+    uint8_t thumbnail_width;
+    uint8_t thumbnail_height;
+    uint8_t *thumbnail_rgba;
+} cupidimage_tga_metadata;
+
 int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image *out,
                         char *err, size_t errcap);
 int cupidimage_load_png_file(const char *path, cupidimage_image *out,
@@ -83,6 +106,16 @@ int cupidimage_load_tiff_page(const unsigned char *data, size_t size,
 int cupidimage_get_tiff_page_count(const unsigned char *data, size_t size,
                                    int *count,
                                    char *err, size_t errcap);
+int cupidimage_load_tga(const unsigned char *data, size_t size,
+                        cupidimage_image *out, char *err, size_t errcap);
+int cupidimage_load_tga_file(const char *path, cupidimage_image *out,
+                             char *err, size_t errcap);
+int cupidimage_load_tga_with_metadata(const unsigned char *data, size_t size,
+                                      cupidimage_image *out,
+                                      cupidimage_tga_metadata *meta,
+                                      int apply_corrections,
+                                      char *err, size_t errcap);
+void cupidimage_free_tga_metadata(cupidimage_tga_metadata *meta);
 int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
                                   cupidimage_animation *out,
                                   char *err, size_t errcap);

@@ -6,9 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 static void usage(const char *prog) {
-    fprintf(stderr, "usage: %s <image-file> [max_width] [max_height]\n", prog);
+    fprintf(stderr, "usage: %s [--fit] <image-file> [max_width] [max_height]\n", prog);
 }
 
 static int is_gif_file(const char *path) {
@@ -32,25 +35,78 @@ static void sleep_ms(unsigned ms) {
     nanosleep(&ts, NULL);
 }
 
+static int parse_int(const char *s, int *out) {
+    if (!s || !*s) {
+        return 0;
+    }
+    char *end = NULL;
+    long val = strtol(s, &end, 10);
+    if (!end || *end != '\0') {
+        return 0;
+    }
+    if (val < INT_MIN || val > INT_MAX) {
+        return 0;
+    }
+    *out = (int)val;
+    return 1;
+}
+
+static void apply_fit(int *maxw, int *maxh) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
+        return;
+    }
+    if (*maxw <= 0 && ws.ws_col > 0) {
+        *maxw = (int)ws.ws_col;
+    }
+    if (*maxh <= 0 && ws.ws_row > 1) {
+        *maxh = (int)ws.ws_row - 1;
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage(argv[0]);
         return 1;
     }
 
+    const char *path = NULL;
     int maxw = 0;
     int maxh = 0;
-    if (argc >= 3) {
-        maxw = atoi(argv[2]);
+    int fit = 0;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--fit") == 0) {
+            fit = 1;
+            continue;
+        }
+        if (!path) {
+            path = argv[i];
+            continue;
+        }
+        if (maxw == 0 && parse_int(argv[i], &maxw)) {
+            continue;
+        }
+        if (maxh == 0 && parse_int(argv[i], &maxh)) {
+            continue;
+        }
+        usage(argv[0]);
+        return 1;
     }
-    if (argc >= 4) {
-        maxh = atoi(argv[3]);
+
+    if (!path) {
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (fit) {
+        apply_fit(&maxw, &maxh);
     }
 
     char err[128];
-    if (is_gif_file(argv[1])) {
+    if (is_gif_file(path)) {
         cupidimage_animation anim;
-        if (!cupidimage_load_gif_animation_file(argv[1], &anim, err, sizeof(err))) {
+        if (!cupidimage_load_gif_animation_file(path, &anim, err, sizeof(err))) {
             fprintf(stderr, "load error: %s\n", err);
             return 1;
         }
@@ -93,7 +149,7 @@ int main(int argc, char **argv) {
     }
 
     cupidimage_image img;
-    if (!cupidimage_load_image_file(argv[1], &img, err, sizeof(err))) {
+    if (!cupidimage_load_image_file(path, &img, err, sizeof(err))) {
         fprintf(stderr, "load error: %s\n", err);
         return 1;
     }
