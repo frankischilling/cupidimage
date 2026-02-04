@@ -63,6 +63,15 @@ typedef struct cupidimage_tga_metadata {
     uint8_t *thumbnail_rgba;
 } cupidimage_tga_metadata;
 
+typedef struct cupidimage_svg_options {
+    uint32_t width;
+    uint32_t height;
+    float scale;
+    float dpi;
+    uint8_t supersampling;
+    uint8_t background_alpha;
+} cupidimage_svg_options;
+
 int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image *out,
                         char *err, size_t errcap);
 int cupidimage_load_png_file(const char *path, cupidimage_image *out,
@@ -116,6 +125,17 @@ int cupidimage_load_tga_with_metadata(const unsigned char *data, size_t size,
                                       int apply_corrections,
                                       char *err, size_t errcap);
 void cupidimage_free_tga_metadata(cupidimage_tga_metadata *meta);
+int cupidimage_load_svg(const unsigned char *data, size_t size, cupidimage_image *out,
+                        char *err, size_t errcap);
+int cupidimage_load_svg_with_options(const unsigned char *data, size_t size,
+                                     cupidimage_image *out,
+                                     const cupidimage_svg_options *opts,
+                                     char *err, size_t errcap);
+int cupidimage_load_svg_file(const char *path, cupidimage_image *out,
+                             char *err, size_t errcap);
+int cupidimage_svg_get_dimensions(const unsigned char *data, size_t size,
+                                  uint32_t *width, uint32_t *height,
+                                  char *err, size_t errcap);
 int cupidimage_load_gif_animation(const unsigned char *data, size_t size,
                                   cupidimage_animation *out,
                                   char *err, size_t errcap);

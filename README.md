@@ -1,6 +1,12 @@
-cupidimage is a dependency-free C99 library for decoding common image formats and rendering them in a terminal using ANSI 24-bit color. It also ships with a small CLI for quick previews.
+cupidimage is a dependency-free C99 library for decoding common image formats and rendering them in a terminal using ANSI 24-bit color blocks. It also ships with a small CLI for quick previews.
+
+Terminal graphics output currently supports:
+- ANSI truecolor escape sequences (`48;2;R;G;B` background colors)
+- No Kitty/iTerm inline image protocol support yet
+- No SIXEL support yet
 
 Supported formats (decoder status):
+- SVG: static subset with shapes (rect/circle/ellipse/line/polyline/polygon/path including arc commands), basic text (`<text>/<tspan>/<textPath>` via built-in bitmap font), presentation + inline styles + basic `<style>` selectors, transforms, viewBox/preserveAspectRatio, linear/radial gradients, patterns, stroke caps/joins/dash, clipPath, luminance masks, and filter primitives: `feGaussianBlur`, `feOffset`, `feColorMatrix`, `feComponentTransfer`, `feMorphology`, `feConvolveMatrix`, `feTurbulence`, `feDisplacementMap`, `feDiffuseLighting`, `feSpecularLighting`, `feTile`, `feImage`, `feFlood`, `feBlend`, `feComposite`, `feMerge` (including Source/Background/FillPaint/StrokePaint filter inputs and primitive subregions). Supersampled rasterization for terminal preview. No SVG animation/scripting/DOM, no external web/data URI fetches, no custom font loading.
 - PNG: non-interlaced and Adam7; color types 0/2/3/4/6 with 1/2/4/8/16-bit depths; palette + tRNS.
 - JPEG: baseline/progressive DCT, Huffman-coded, 8-bit precision; grayscale/YCbCr/CMYK/YCCK; sampling up to 2x2. No arithmetic coding or >2x2 sampling.
 - WebP: VP8 lossy keyframes; VP8X still images; VP8L lossless with transforms/color cache; ALPH chunk method 0. No animation or interframes.
@@ -55,12 +61,13 @@ cc -Isrc -c src/cupidimage_bmp.c -o obj/cupidimage_bmp.o
 cc -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 cc -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
 cc -Isrc -c src/cupidimage_tga.c -o obj/cupidimage_tga.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o obj/cupidimage_tga.o
+cc -Isrc -c src/cupidimage_svg.c -o obj/cupidimage_svg.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o obj/cupidimage_tga.o obj/cupidimage_svg.o
 ```
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_tga.c src/cupidimage_cli.c -o bin/cupidimage -lm
+cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_tga.c src/cupidimage_svg.c src/cupidimage_cli.c -o bin/cupidimage -lm
 ```
 
 Use the CLI:
@@ -157,9 +164,21 @@ Quick TGA smoke test (expects failures for invalid samples):
 scripts/test_tga_assets.sh
 ```
 
+Quick TIFF smoke test (expects failures for invalid samples):
+```sh
+scripts/test_tiff_assets.sh
+```
+
+Quick SVG smoke test:
+```sh
+scripts/make_test_svgs.sh
+scripts/test_svg_assets.sh
+```
+
 
 Todo
 - [ ] For each image format provide option for checkerboard or white for alpha
-- [ ] SVG
+- [ ] SVG: wider text/font support
+- [ ] SVG: markers, use/symbol, and more filter primitives
 - [ ] PDF
 - [ ] HEIC / HEIF

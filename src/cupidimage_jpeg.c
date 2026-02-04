@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #ifdef CUPIDIMAGE_JPEG_DEBUG
 #define JPEG_DEBUG(...) fprintf(stderr, __VA_ARGS__)
@@ -18,6 +19,34 @@ static void set_err(char *err, size_t errcap, const char *msg) {
 
 static uint16_t read_be16(const unsigned char *p) {
     return (uint16_t)((p[0] << 8) | p[1]);
+}
+
+static int is_svg_data(const unsigned char *data, size_t size) {
+    if (!data || size < 4) {
+        return 0;
+    }
+    size_t n = size < 4096 ? size : 4096;
+    size_t i = 0;
+    if (n >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) {
+        i = 3;
+    }
+    while (i < n && isspace((unsigned char)data[i])) {
+        i++;
+    }
+    for (size_t j = i; j + 3 < n; j++) {
+        if (data[j] == 0) {
+            return 0;
+        }
+        if (data[j] == '<') {
+            unsigned char c1 = (unsigned char)tolower(data[j + 1]);
+            unsigned char c2 = (unsigned char)tolower(data[j + 2]);
+            unsigned char c3 = (unsigned char)tolower(data[j + 3]);
+            if (c1 == 's' && c2 == 'v' && c3 == 'g') {
+                return 1;
+            }
+        }
+    }
+    return 0;
 }
 
 typedef struct jpeg_huff {
@@ -1621,6 +1650,9 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
         if (count > 0 && 6u + (size_t)count * 16u <= size) {
             return cupidimage_load_ico(data, size, out, err, errcap);
         }
+    }
+    if (is_svg_data(data, size)) {
+        return cupidimage_load_svg(data, size, out, err, errcap);
     }
     if (size >= 8 && data[0] == 137 && data[1] == 80 && data[2] == 78 && data[3] == 71) {
         return cupidimage_load_png(data, size, out, err, errcap);
