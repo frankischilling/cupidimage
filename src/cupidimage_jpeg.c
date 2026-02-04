@@ -1645,6 +1645,9 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
             }
         }
     }
+    if (size >= 5 && memcmp(data, "%PDF-", 5) == 0) {
+        return cupidimage_load_pdf(data, size, out, err, errcap);
+    }
     if (size >= 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
         data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P') {
         return cupidimage_load_webp(data, size, out, err, errcap);

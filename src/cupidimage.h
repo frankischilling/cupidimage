@@ -126,6 +126,23 @@ int cupidimage_load_tga_with_metadata(const unsigned char *data, size_t size,
                                       int apply_corrections,
                                       char *err, size_t errcap);
 void cupidimage_free_tga_metadata(cupidimage_tga_metadata *meta);
+int cupidimage_load_pdf(const unsigned char *data, size_t size,
+                        cupidimage_image *out, char *err, size_t errcap);
+int cupidimage_load_pdf_file(const char *path, cupidimage_image *out,
+                             char *err, size_t errcap);
+int cupidimage_load_pdf_page(const unsigned char *data, size_t size,
+                             cupidimage_image *out,
+                             int page_index,
+                             char *err, size_t errcap);
+int cupidimage_load_pdf_page_file(const char *path, cupidimage_image *out,
+                                  int page_index,
+                                  char *err, size_t errcap);
+int cupidimage_get_pdf_page_count(const unsigned char *data, size_t size,
+                                  int *count,
+                                  char *err, size_t errcap);
+int cupidimage_get_pdf_page_count_file(const char *path,
+                                       int *count,
+                                       char *err, size_t errcap);
 int cupidimage_load_svg(const unsigned char *data, size_t size, cupidimage_image *out,
                         char *err, size_t errcap);
 int cupidimage_load_svg_with_options(const unsigned char *data, size_t size,

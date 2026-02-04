@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 static void usage(const char *prog) {
-    fprintf(stderr, "usage: %s [--fit] [--svg-time seconds] <image-file> [max_width] [max_height]\n", prog);
+    fprintf(stderr, "usage: %s [--fit] [--svg-time seconds] [--pdf-page number] <image-file> [max_width] [max_height]\n", prog);
 }
 
 static int is_gif_file(const char *path) {
@@ -93,6 +93,17 @@ static int path_has_svg_extension(const char *path) {
         return 0;
     }
     return strcmp(dot, ".svg") == 0 || strcmp(dot, ".SVG") == 0;
+}
+
+static int path_has_pdf_extension(const char *path) {
+    if (!path) {
+        return 0;
+    }
+    const char *dot = strrchr(path, '.');
+    if (!dot) {
+        return 0;
+    }
+    return strcmp(dot, ".pdf") == 0 || strcmp(dot, ".PDF") == 0;
 }
 
 static int read_file_text(const char *path, char **out_text, size_t *out_size) {
@@ -626,6 +637,8 @@ int main(int argc, char **argv) {
     int fit = 0;
     int has_svg_time = 0;
     float svg_time = 0.0f;
+    int has_pdf_page = 0;
+    int pdf_page = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--fit") == 0) {
@@ -638,6 +651,15 @@ int main(int argc, char **argv) {
                 return 1;
             }
             has_svg_time = 1;
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--pdf-page") == 0) {
+            if (i + 1 >= argc || !parse_int(argv[i + 1], &pdf_page) || pdf_page <= 0) {
+                usage(argv[0]);
+                return 1;
+            }
+            has_pdf_page = 1;
             i++;
             continue;
         }
@@ -718,6 +740,57 @@ int main(int argc, char **argv) {
         if (anim_res > 0) {
             return 0;
         }
+    }
+
+    if (path_has_pdf_extension(path)) {
+        int page_count = 0;
+        if (!cupidimage_get_pdf_page_count_file(path, &page_count, err, sizeof(err))) {
+            fprintf(stderr, "load error: %s\n", err);
+            return 1;
+        }
+        if (page_count <= 0) {
+            fprintf(stderr, "load error: pdf has no pages\n");
+            return 1;
+        }
+
+        int start_page = 0;
+        int end_page = page_count - 1;
+        if (has_pdf_page) {
+            start_page = pdf_page - 1;
+            end_page = start_page;
+            if (start_page < 0 || start_page >= page_count) {
+                fprintf(stderr, "load error: pdf page out of range (1-%d)\n", page_count);
+                return 1;
+            }
+        }
+
+        for (int page = start_page; page <= end_page; page++) {
+            cupidimage_image img;
+            if (!cupidimage_load_pdf_page_file(path, &img, page, err, sizeof(err))) {
+                fprintf(stderr, "load error: %s\n", err);
+                return 1;
+            }
+
+            if (page_count > 1 && !has_pdf_page) {
+                fprintf(stderr, "[pdf page %d/%d]\n", page + 1, page_count);
+            }
+            if (!cupidimage_render_ansi(&img, stdout, maxw, maxh)) {
+                fprintf(stderr, "render error\n");
+                cupidimage_free(&img);
+                return 1;
+            }
+            cupidimage_free(&img);
+
+            if (page < end_page) {
+                fputc('\n', stdout);
+            }
+        }
+        return 0;
+    }
+
+    if (has_pdf_page) {
+        fprintf(stderr, "load error: --pdf-page is only valid for PDF files\n");
+        return 1;
     }
 
     cupidimage_image img;

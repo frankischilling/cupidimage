@@ -15,6 +15,7 @@ Supported formats (decoder status):
 - ICO/CUR: directory enumeration + page-based decode; PNG-compressed and DIB icons at 1/4/8/24/32-bit; AND mask transparency; CUR hotspots.
 - TIFF: Classic + BigTIFF; byte orders II/MM; compression none/LZW/PackBits/Deflate/JPEG/CCITT RLE/G3/G4; photometric bilevel/grayscale(+alpha)/RGB/RGBA/palette/CMYK/YCbCr/Lab; strips/tiles; planar 1/2; predictor=2; orientation 1-8; multi-page IFDs (SubIFD pages via page APIs).
 - TGA: types 0-3/9-11; uncompressed/RLE; 8/15/16/24/32-bit; all origins; color-mapped/RGB/grayscale; TGA 2.0 metadata + thumbnail + gamma/color correction.
+- PDF: basic text and simple graphics via minimal parser; FlateDecode streams; text positioning operators (BT/ET/Td/Tj); RGB color operators (rg/RG); stub glyph rendering. No complex fonts, transparency, patterns, or annotations.
 
 Build (Makefile):
 ```sh
@@ -77,6 +78,8 @@ Use the CLI:
 ./bin/cupidimage test.webp 120 60
 ./bin/cupidimage --fit test.png
 ./bin/cupidimage --svg-time 1.5 assets/svg/animation_basic.svg
+./bin/cupidimage document.pdf
+./bin/cupidimage --pdf-page 3 document.pdf
 ```
 
 When stdout is an interactive terminal, SVG files containing SMIL animation tags (`<animate>`, `<animateTransform>`, `<set>`) or CSS `animation`/`@keyframes` now auto-play.
@@ -198,8 +201,13 @@ scripts/test_svg_regressions.sh
 make test-svg-regressions
 ```
 
+Quick PDF test:
+```sh
+scripts/make_test_pdfs.sh
+scripts/test_pdf_assets.sh
+```
+
 
 Todo
 - [ ] For each image format provide option for checkerboard or white for alpha
-- [ ] PDF
 - [ ] HEIC / HEIF
