@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="200" viewBox="0 0 340 200">
+  <defs>
+    <filter id="fimg" x="-10%" y="-10%" width="120%" height="120%">
+      <feImage href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyMCcgaGVpZ2h0PScyMCc+PHJlY3Qgd2lkdGg9JzIwJyBoZWlnaHQ9JzIwJyBmaWxsPScjM2E4NmZmJy8+PC9zdmc+" x="0" y="0" width="120" height="80" result="img"/>
+      <feComposite in="img" in2="SourceGraphic" operator="over"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="340" height="200" fill="#ffffff"/>
+  <rect x="20" y="20" width="120" height="80" fill="#fb8500" filter="url(#fimg)"/>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="90" viewBox="0 0 140 90">
+  <style>
+    #mover { animation: move 2s linear infinite; }
+    @keyframes move {
+      0% { transform: translate(10, 52); }
+      100% { transform: translate(90, 52); }
+    }
+
+    #s0 { animation: pulse0 2s linear infinite; }
+    @keyframes pulse0 {
+      0% { stop-color: #fb8500; }
+      50% { stop-color: #22c55e; }
+      100% { stop-color: #fb8500; }
+    }
+  </style>
+
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop id="s0" offset="0%" stop-color="#fb8500"/>
+      <stop offset="100%" stop-color="#3a86ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="140" height="90" fill="#ffffff"/>
+  <rect x="10" y="10" width="120" height="24" fill="url(#g)"/>
+
+  <g id="mover" transform="translate(10,52)">
+    <rect x="0" y="0" width="20" height="20" fill="#2563eb"/>
+  </g>
+</svg>

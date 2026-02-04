@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80">
+  <rect x="0" y="0" width="120" height="80" fill="#ffffff"/>
+
+  <rect x="10" y="16" width="20" height="20" fill="#f97316">
+    <animate attributeName="x" from="10" to="90" dur="4s" fill="freeze"/>
+  </rect>
+
+  <rect x="50" y="10" width="20" height="12" fill="#2563eb">
+    <animateTransform attributeName="transform" type="translate"
+                      from="0 0" to="0 40" dur="2s" fill="freeze"/>
+  </rect>
+</svg>
