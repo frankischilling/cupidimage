@@ -14,6 +14,7 @@
 #define SVG_MAX_DEPTH 64
 #define SVG_MAX_DASH 16
 #define SVG_MAX_TRANSFER_TABLE 64
+#define SVG_MAX_INFO_ATTR 32
 
 typedef struct svg_attr {
     char *name;
@@ -63,6 +64,11 @@ typedef enum {
     SVG_SPREAD_REPEAT
 } svg_spread_method;
 
+typedef enum {
+    SVG_MASK_TYPE_LUMINANCE,
+    SVG_MASK_TYPE_ALPHA
+} svg_mask_type;
+
 typedef struct svg_grad_coord {
     float value;
     int is_percent;
@@ -96,6 +102,47 @@ typedef struct svg_path_def {
     char *id;
     char *d;
 } svg_path_def;
+
+typedef struct svg_use_def {
+    char *id;
+    char *tag_name;
+    svg_attr attrs[SVG_MAX_ATTR];
+    int attr_count;
+} svg_use_def;
+
+typedef struct svg_symbol {
+    char *id;
+    char *content;
+    float vb_x;
+    float vb_y;
+    float vb_w;
+    float vb_h;
+    int vb_ok;
+    int preserve_none;
+    float align_x;
+    float align_y;
+} svg_symbol;
+
+typedef struct svg_marker {
+    char *id;
+    char *content;
+    float ref_x;
+    float ref_y;
+    float marker_w;
+    float marker_h;
+    int units_stroke_width;
+    int orient_auto;
+    int orient_auto_start_reverse;
+    float orient_angle;
+    float vb_x;
+    float vb_y;
+    float vb_w;
+    float vb_h;
+    int vb_ok;
+    int preserve_none;
+    float align_x;
+    float align_y;
+} svg_marker;
 
 typedef struct svg_pattern {
     char *id;
@@ -161,6 +208,8 @@ typedef struct svg_mask {
     svg_matrix transform;
     svg_matrix inv_transform;
     int has_transform;
+    int type;
+    int has_type;
     char *content;
     uint8_t *rgba;
     uint32_t mask_w;
@@ -196,6 +245,15 @@ typedef struct svg_defs {
     struct svg_path_def *paths;
     int path_count;
     int path_cap;
+    struct svg_use_def *uses;
+    int use_count;
+    int use_cap;
+    struct svg_symbol *symbols;
+    int symbol_count;
+    int symbol_cap;
+    struct svg_marker *markers;
+    int marker_count;
+    int marker_cap;
     svg_clip_path *clips;
     int clip_count;
     int clip_cap;
@@ -217,10 +275,15 @@ typedef struct svg_selector_part {
     char *id;
     char **classes;
     int class_count;
+    char **attr_names;
+    char **attr_values;
+    uint8_t *attr_has_value;
+    int attr_count;
 } svg_selector_part;
 
 typedef struct svg_selector {
     svg_selector_part *parts;
+    int *combinators;
     int part_count;
     int specificity;
 } svg_selector;
@@ -250,6 +313,9 @@ typedef struct svg_style {
     svg_pattern *stroke_pattern;
     svg_clip_path *clip_path;
     svg_mask *mask;
+    svg_marker *marker_start;
+    svg_marker *marker_mid;
+    svg_marker *marker_end;
     const svg_filter *filter;
     uint32_t color;
     float fill_opacity;
@@ -269,6 +335,9 @@ typedef struct svg_style {
     int text_anchor;
     int bold;
     int italic;
+    int dominant_baseline;
+    int display_none;
+    int visibility_hidden;
 } svg_style;
 
 typedef struct svg_bbox {
@@ -436,7 +505,10 @@ typedef enum {
     SVG_BLEND_MULTIPLY,
     SVG_BLEND_SCREEN,
     SVG_BLEND_DARKEN,
-    SVG_BLEND_LIGHTEN
+    SVG_BLEND_LIGHTEN,
+    SVG_BLEND_OVERLAY,
+    SVG_BLEND_HARDLIGHT,
+    SVG_BLEND_SOFTLIGHT
 } svg_blend_mode;
 
 typedef enum {
@@ -547,6 +619,9 @@ typedef struct svg_elem_info {
     const char *tag;
     const char *id;
     const char *class_attr;
+    const char *attr_names[SVG_MAX_INFO_ATTR];
+    const char *attr_values[SVG_MAX_INFO_ATTR];
+    int attr_count;
 } svg_elem_info;
 
 typedef struct svg_stack_item {
@@ -554,6 +629,12 @@ typedef struct svg_stack_item {
     svg_matrix transform;
     svg_elem_info info;
 } svg_stack_item;
+
+typedef struct svg_sibling_frame {
+    svg_elem_info *items;
+    int count;
+    int cap;
+} svg_sibling_frame;
 
 static void set_err(char *err, size_t errcap, const char *msg) {
     if (err && errcap) {
@@ -763,6 +844,57 @@ static const char *svg_get_attr_exact(const svg_tag *tag, const char *name) {
     return NULL;
 }
 
+static void svg_elem_info_from_tag(svg_elem_info *info, const char *local, const svg_tag *tag) {
+    if (!info) {
+        return;
+    }
+    memset(info, 0, sizeof(*info));
+    info->tag = local;
+    if (!tag) {
+        return;
+    }
+    info->id = svg_get_attr(tag, "id");
+    info->class_attr = svg_get_attr(tag, "class");
+    int count = tag->attr_count;
+    if (count > SVG_MAX_INFO_ATTR) {
+        count = SVG_MAX_INFO_ATTR;
+    }
+    info->attr_count = count;
+    for (int i = 0; i < count; i++) {
+        info->attr_names[i] = tag->attrs[i].name;
+        info->attr_values[i] = tag->attrs[i].value;
+    }
+}
+
+static void svg_sibling_frames_free(svg_sibling_frame *frames, int depth_cap) {
+    if (!frames || depth_cap <= 0) {
+        return;
+    }
+    for (int i = 0; i < depth_cap; i++) {
+        free(frames[i].items);
+        frames[i].items = NULL;
+        frames[i].count = 0;
+        frames[i].cap = 0;
+    }
+}
+
+static int svg_sibling_frame_push(svg_sibling_frame *frame, const svg_elem_info *info) {
+    if (!frame || !info) {
+        return 0;
+    }
+    if (frame->count >= frame->cap) {
+        int new_cap = frame->cap ? frame->cap * 2 : 16;
+        svg_elem_info *n = (svg_elem_info *)realloc(frame->items, (size_t)new_cap * sizeof(svg_elem_info));
+        if (!n) {
+            return 0;
+        }
+        frame->items = n;
+        frame->cap = new_cap;
+    }
+    frame->items[frame->count++] = *info;
+    return 1;
+}
+
 static void svg_skip_separators(const char **p) {
     while (**p && (isspace((unsigned char)**p) || **p == ',')) {
         (*p)++;
@@ -885,6 +1017,43 @@ static int svg_parse_length_value(const char **p, float base, float dpi, float *
     return 1;
 }
 
+static int svg_parse_opacity_value(const char *s, float *out) {
+    if (!s || !out) {
+        return 0;
+    }
+    while (isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (!*s) {
+        return 0;
+    }
+    char *end = NULL;
+    double v = strtod(s, &end);
+    if (end == s) {
+        return 0;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end == '%') {
+        v /= 100.0;
+        end++;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end) {
+        return 0;
+    }
+    if (v < 0.0) {
+        v = 0.0;
+    } else if (v > 1.0) {
+        v = 1.0;
+    }
+    *out = (float)v;
+    return 1;
+}
+
 static int svg_parse_viewbox(const char *s, float *x, float *y, float *w, float *h) {
     if (!s) {
         return 0;
@@ -903,6 +1072,40 @@ static int svg_parse_viewbox(const char *s, float *x, float *y, float *w, float 
     return 1;
 }
 
+static void svg_parse_preserve_aspect_ratio(const char *s, int *preserve_none, float *align_x, float *align_y) {
+    if (preserve_none) {
+        *preserve_none = 0;
+    }
+    if (align_x) {
+        *align_x = 0.5f;
+    }
+    if (align_y) {
+        *align_y = 0.5f;
+    }
+    if (!s) {
+        return;
+    }
+    const char *tok = s;
+    while (*tok && isspace((unsigned char)*tok)) {
+        tok++;
+    }
+    if (strncmp(tok, "none", 4) == 0) {
+        if (preserve_none) {
+            *preserve_none = 1;
+        }
+        return;
+    }
+    if (strncmp(tok, "xMinYMin", 8) == 0) { if (align_x) *align_x = 0.0f; if (align_y) *align_y = 0.0f; }
+    else if (strncmp(tok, "xMidYMin", 8) == 0) { if (align_x) *align_x = 0.5f; if (align_y) *align_y = 0.0f; }
+    else if (strncmp(tok, "xMaxYMin", 8) == 0) { if (align_x) *align_x = 1.0f; if (align_y) *align_y = 0.0f; }
+    else if (strncmp(tok, "xMinYMid", 8) == 0) { if (align_x) *align_x = 0.0f; if (align_y) *align_y = 0.5f; }
+    else if (strncmp(tok, "xMidYMid", 8) == 0) { if (align_x) *align_x = 0.5f; if (align_y) *align_y = 0.5f; }
+    else if (strncmp(tok, "xMaxYMid", 8) == 0) { if (align_x) *align_x = 1.0f; if (align_y) *align_y = 0.5f; }
+    else if (strncmp(tok, "xMinYMax", 8) == 0) { if (align_x) *align_x = 0.0f; if (align_y) *align_y = 1.0f; }
+    else if (strncmp(tok, "xMidYMax", 8) == 0) { if (align_x) *align_x = 0.5f; if (align_y) *align_y = 1.0f; }
+    else if (strncmp(tok, "xMaxYMax", 8) == 0) { if (align_x) *align_x = 1.0f; if (align_y) *align_y = 1.0f; }
+}
+
 typedef enum {
     SVG_PROP_FILL,
     SVG_PROP_STROKE,
@@ -914,6 +1117,10 @@ typedef enum {
     SVG_PROP_STROKE_DASHOFFSET,
     SVG_PROP_CLIP_PATH,
     SVG_PROP_MASK,
+    SVG_PROP_MARKER,
+    SVG_PROP_MARKER_START,
+    SVG_PROP_MARKER_MID,
+    SVG_PROP_MARKER_END,
     SVG_PROP_FILTER,
     SVG_PROP_OPACITY,
     SVG_PROP_FILL_OPACITY,
@@ -924,8 +1131,11 @@ typedef enum {
     SVG_PROP_TEXT_ANCHOR,
     SVG_PROP_FONT_WEIGHT,
     SVG_PROP_FONT_STYLE,
+    SVG_PROP_DOMINANT_BASELINE,
     SVG_PROP_LETTER_SPACING,
     SVG_PROP_WORD_SPACING,
+    SVG_PROP_DISPLAY,
+    SVG_PROP_VISIBILITY,
     SVG_PROP_COUNT
 } svg_property;
 
@@ -940,6 +1150,9 @@ static void svg_style_init(svg_style *style) {
     style->stroke_pattern = NULL;
     style->clip_path = NULL;
     style->mask = NULL;
+    style->marker_start = NULL;
+    style->marker_mid = NULL;
+    style->marker_end = NULL;
     style->filter = NULL;
     style->color = 0x000000FFu;
     style->fill_opacity = 1.0f;
@@ -961,6 +1174,9 @@ static void svg_style_init(svg_style *style) {
     style->text_anchor = 0;
     style->bold = 0;
     style->italic = 0;
+    style->dominant_baseline = 0;
+    style->display_none = 0;
+    style->visibility_hidden = 0;
 }
 
 typedef struct svg_named_color {
@@ -1250,6 +1466,135 @@ static const uint8_t svg_font8x8_basic[128][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}
 };
 
+static float svg_clamp01(float v) {
+    if (v < 0.0f) {
+        return 0.0f;
+    }
+    if (v > 1.0f) {
+        return 1.0f;
+    }
+    return v;
+}
+
+static float svg_hue_to_rgb_component(float p, float q, float t) {
+    if (t < 0.0f) {
+        t += 1.0f;
+    } else if (t > 1.0f) {
+        t -= 1.0f;
+    }
+    if (t < (1.0f / 6.0f)) {
+        return p + (q - p) * 6.0f * t;
+    }
+    if (t < 0.5f) {
+        return q;
+    }
+    if (t < (2.0f / 3.0f)) {
+        return p + (q - p) * ((2.0f / 3.0f) - t) * 6.0f;
+    }
+    return p;
+}
+
+static void svg_hsl_to_rgb(float h_deg, float s, float l, float *r, float *g, float *b) {
+    if (!r || !g || !b) {
+        return;
+    }
+    s = svg_clamp01(s);
+    l = svg_clamp01(l);
+    float h = h_deg / 360.0f;
+    h = h - floorf(h);
+    if (s <= 1e-6f) {
+        *r = l;
+        *g = l;
+        *b = l;
+        return;
+    }
+    float q = (l < 0.5f) ? (l * (1.0f + s)) : (l + s - l * s);
+    float p = 2.0f * l - q;
+    *r = svg_hue_to_rgb_component(p, q, h + (1.0f / 3.0f));
+    *g = svg_hue_to_rgb_component(p, q, h);
+    *b = svg_hue_to_rgb_component(p, q, h - (1.0f / 3.0f));
+}
+
+static int svg_parse_color_component(const char **p, float *out, int *is_percent) {
+    if (!p || !*p || !out) {
+        return 0;
+    }
+    svg_skip_separators(p);
+    if (!**p) {
+        return 0;
+    }
+    char *end = NULL;
+    double v = strtod(*p, &end);
+    if (end == *p) {
+        return 0;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    int percent = 0;
+    if (*end == '%') {
+        percent = 1;
+        end++;
+    }
+    *out = (float)v;
+    if (is_percent) {
+        *is_percent = percent;
+    }
+    *p = end;
+    return 1;
+}
+
+static int svg_parse_hue_component(const char **p, float *out_deg) {
+    if (!p || !*p || !out_deg) {
+        return 0;
+    }
+    svg_skip_separators(p);
+    if (!**p) {
+        return 0;
+    }
+    char *end = NULL;
+    double v = strtod(*p, &end);
+    if (end == *p) {
+        return 0;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (svg_strncasecmp(end, "deg", 3) == 0) {
+        end += 3;
+    } else if (svg_strncasecmp(end, "grad", 4) == 0) {
+        v *= 0.9;
+        end += 4;
+    } else if (svg_strncasecmp(end, "rad", 3) == 0) {
+        v = v * (180.0 / M_PI);
+        end += 3;
+    } else if (svg_strncasecmp(end, "turn", 4) == 0) {
+        v *= 360.0;
+        end += 4;
+    }
+    *out_deg = (float)v;
+    *p = end;
+    return 1;
+}
+
+static int svg_parse_alpha_component(const char **p, float *out_alpha) {
+    float v = 0.0f;
+    int is_percent = 0;
+    if (!svg_parse_color_component(p, &v, &is_percent)) {
+        return 0;
+    }
+    float alpha = 0.0f;
+    if (is_percent) {
+        alpha = v / 100.0f;
+    } else if (v <= 1.0f) {
+        alpha = v;
+    } else {
+        alpha = v / 255.0f;
+    }
+    *out_alpha = svg_clamp01(alpha);
+    return 1;
+}
+
 static int svg_parse_color(const char *s, uint32_t *out, int *is_none) {
     if (is_none) {
         *is_none = 0;
@@ -1298,45 +1643,82 @@ static int svg_parse_color(const char *s, uint32_t *out, int *is_none) {
         return 0;
     }
     if (svg_strncasecmp(s, "rgb(", 4) == 0 || svg_strncasecmp(s, "rgba(", 5) == 0) {
-        int has_alpha = (tolower((unsigned char)s[3]) == 'a');
-        const char *p = s + (has_alpha ? 5 : 4);
-        float comps[4] = {0, 0, 0, 1};
-        for (int i = 0; i < (has_alpha ? 4 : 3); i++) {
-            svg_skip_separators(&p);
-            if (!*p) {
-                return 0;
-            }
-            char *end = NULL;
-            double v = strtod(p, &end);
-            if (end == p) {
-                return 0;
-            }
+        int has_alpha_func = (tolower((unsigned char)s[3]) == 'a');
+        const char *p = s + (has_alpha_func ? 5 : 4);
+        float rgb[3] = {0, 0, 0};
+        for (int i = 0; i < 3; i++) {
+            float v = 0.0f;
             int percent = 0;
-            while (isspace((unsigned char)*end)) {
-                end++;
+            if (!svg_parse_color_component(&p, &v, &percent)) {
+                return 0;
             }
-            if (*end == '%') {
-                percent = 1;
-                end++;
-            }
-            comps[i] = (float)v;
             if (percent) {
-                comps[i] = comps[i] * 2.55f;
+                v = v * 2.55f;
             }
-            p = end;
+            rgb[i] = v;
         }
-        int r = (int)lroundf(fmaxf(0.0f, fminf(255.0f, comps[0])));
-        int g = (int)lroundf(fmaxf(0.0f, fminf(255.0f, comps[1])));
-        int b = (int)lroundf(fmaxf(0.0f, fminf(255.0f, comps[2])));
-        int a = 255;
-        if (has_alpha) {
-            float alpha = comps[3];
-            if (alpha <= 1.0f) {
-                a = (int)lroundf(alpha * 255.0f);
-            } else {
-                a = (int)lroundf(fmaxf(0.0f, fminf(255.0f, alpha)));
+        float alpha = 1.0f;
+        svg_skip_separators(&p);
+        if (*p == '/') {
+            p++;
+            if (!svg_parse_alpha_component(&p, &alpha)) {
+                return 0;
+            }
+        } else if (has_alpha_func) {
+            if (!svg_parse_alpha_component(&p, &alpha)) {
+                return 0;
             }
         }
+        int r = (int)lroundf(fmaxf(0.0f, fminf(255.0f, rgb[0])));
+        int g = (int)lroundf(fmaxf(0.0f, fminf(255.0f, rgb[1])));
+        int b = (int)lroundf(fmaxf(0.0f, fminf(255.0f, rgb[2])));
+        int a = (int)lroundf(svg_clamp01(alpha) * 255.0f);
+        *out = (uint32_t)((r << 24) | (g << 16) | (b << 8) | (a & 0xFF));
+        return 1;
+    }
+    if (svg_strncasecmp(s, "hsl(", 4) == 0 || svg_strncasecmp(s, "hsla(", 5) == 0) {
+        int has_alpha_func = (tolower((unsigned char)s[3]) == 'a');
+        const char *p = s + (has_alpha_func ? 5 : 4);
+        float h = 0.0f;
+        if (!svg_parse_hue_component(&p, &h)) {
+            return 0;
+        }
+        float s_comp = 0.0f;
+        float l_comp = 0.0f;
+        int s_percent = 0;
+        int l_percent = 0;
+        if (!svg_parse_color_component(&p, &s_comp, &s_percent)) {
+            return 0;
+        }
+        if (!svg_parse_color_component(&p, &l_comp, &l_percent)) {
+            return 0;
+        }
+        float sat = s_percent ? (s_comp / 100.0f) : s_comp;
+        float lig = l_percent ? (l_comp / 100.0f) : l_comp;
+        if (!s_percent && sat > 1.0f) {
+            sat /= 100.0f;
+        }
+        if (!l_percent && lig > 1.0f) {
+            lig /= 100.0f;
+        }
+        float alpha = 1.0f;
+        svg_skip_separators(&p);
+        if (*p == '/') {
+            p++;
+            if (!svg_parse_alpha_component(&p, &alpha)) {
+                return 0;
+            }
+        } else if (has_alpha_func) {
+            if (!svg_parse_alpha_component(&p, &alpha)) {
+                return 0;
+            }
+        }
+        float rf = 0.0f, gf = 0.0f, bf = 0.0f;
+        svg_hsl_to_rgb(h, sat, lig, &rf, &gf, &bf);
+        int r = (int)lroundf(svg_clamp01(rf) * 255.0f);
+        int g = (int)lroundf(svg_clamp01(gf) * 255.0f);
+        int b = (int)lroundf(svg_clamp01(bf) * 255.0f);
+        int a = (int)lroundf(svg_clamp01(alpha) * 255.0f);
         *out = (uint32_t)((r << 24) | (g << 16) | (b << 8) | (a & 0xFF));
         return 1;
     }
@@ -1352,6 +1734,8 @@ static int svg_parse_color(const char *s, uint32_t *out, int *is_none) {
 static const svg_gradient *svg_defs_find_gradient(const svg_defs *defs, const char *id);
 static const svg_pattern *svg_defs_find_pattern(const svg_defs *defs, const char *id);
 static const svg_path_def *svg_defs_find_path(const svg_defs *defs, const char *id);
+static const svg_symbol *svg_defs_find_symbol(const svg_defs *defs, const char *id);
+static svg_marker *svg_defs_find_marker(svg_defs *defs, const char *id);
 static svg_clip_path *svg_defs_find_clip(svg_defs *defs, const char *id);
 static svg_mask *svg_defs_find_mask(svg_defs *defs, const char *id);
 static const svg_filter *svg_defs_find_filter(const svg_defs *defs, const char *id);
@@ -1377,6 +1761,10 @@ static int svg_property_id(const char *name) {
     if (strcmp(name, "stroke-dashoffset") == 0) return SVG_PROP_STROKE_DASHOFFSET;
     if (strcmp(name, "clip-path") == 0) return SVG_PROP_CLIP_PATH;
     if (strcmp(name, "mask") == 0) return SVG_PROP_MASK;
+    if (strcmp(name, "marker") == 0) return SVG_PROP_MARKER;
+    if (strcmp(name, "marker-start") == 0) return SVG_PROP_MARKER_START;
+    if (strcmp(name, "marker-mid") == 0) return SVG_PROP_MARKER_MID;
+    if (strcmp(name, "marker-end") == 0) return SVG_PROP_MARKER_END;
     if (strcmp(name, "filter") == 0) return SVG_PROP_FILTER;
     if (strcmp(name, "opacity") == 0) return SVG_PROP_OPACITY;
     if (strcmp(name, "fill-opacity") == 0) return SVG_PROP_FILL_OPACITY;
@@ -1387,8 +1775,12 @@ static int svg_property_id(const char *name) {
     if (strcmp(name, "text-anchor") == 0) return SVG_PROP_TEXT_ANCHOR;
     if (strcmp(name, "font-weight") == 0) return SVG_PROP_FONT_WEIGHT;
     if (strcmp(name, "font-style") == 0) return SVG_PROP_FONT_STYLE;
+    if (strcmp(name, "dominant-baseline") == 0) return SVG_PROP_DOMINANT_BASELINE;
+    if (strcmp(name, "alignment-baseline") == 0) return SVG_PROP_DOMINANT_BASELINE;
     if (strcmp(name, "letter-spacing") == 0) return SVG_PROP_LETTER_SPACING;
     if (strcmp(name, "word-spacing") == 0) return SVG_PROP_WORD_SPACING;
+    if (strcmp(name, "display") == 0) return SVG_PROP_DISPLAY;
+    if (strcmp(name, "visibility") == 0) return SVG_PROP_VISIBILITY;
     return -1;
 }
 
@@ -1421,6 +1813,127 @@ static int svg_parse_url_id(const char *value, char *out, size_t outcap) {
     memcpy(out, start, len);
     out[len] = '\0';
     return 1;
+}
+
+static int svg_parse_href_id(const char *value, char *out, size_t outcap) {
+    if (!value || !out || outcap == 0) {
+        return 0;
+    }
+    const char *p = value;
+    while (isspace((unsigned char)*p)) {
+        p++;
+    }
+    if (!*p) {
+        return 0;
+    }
+    if (*p == '#') {
+        p++;
+        const char *start = p;
+        while (*p && !isspace((unsigned char)*p)) {
+            p++;
+        }
+        size_t len = (size_t)(p - start);
+        if (len == 0 || len >= outcap) {
+            return 0;
+        }
+        memcpy(out, start, len);
+        out[len] = '\0';
+        return 1;
+    }
+    if (svg_parse_url_id(value, out, outcap)) {
+        return 1;
+    }
+    const char *hash = strchr(p, '#');
+    if (hash && hash[1]) {
+        hash++;
+        const char *start = hash;
+        while (*hash && !isspace((unsigned char)*hash)) {
+            hash++;
+        }
+        size_t len = (size_t)(hash - start);
+        if (len == 0 || len >= outcap) {
+            return 0;
+        }
+        memcpy(out, start, len);
+        out[len] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int svg_should_skip_use_wrapper_attr(const char *name) {
+    if (!name) {
+        return 1;
+    }
+    const char *local = svg_local_name(name);
+    if (!local) {
+        return 1;
+    }
+    return strcmp(local, "href") == 0 || strcmp(local, "x") == 0 || strcmp(local, "y") == 0 ||
+           strcmp(local, "width") == 0 || strcmp(local, "height") == 0 ||
+           strcmp(local, "transform") == 0;
+}
+
+static char *svg_build_use_wrapper_attrs(const svg_tag *tag) {
+    if (!tag) {
+        return NULL;
+    }
+    size_t cap = 256;
+    size_t len = 0;
+    char *buf = (char *)malloc(cap);
+    if (!buf) {
+        return NULL;
+    }
+    buf[0] = '\0';
+    for (int i = 0; i < tag->attr_count; i++) {
+        const char *name = tag->attrs[i].name;
+        const char *value = tag->attrs[i].value ? tag->attrs[i].value : "";
+        if (svg_should_skip_use_wrapper_attr(name)) {
+            continue;
+        }
+        size_t need = strlen(name) + strlen(value) + 4u;
+        if (len + need + 1u > cap) {
+            size_t new_cap = cap * 2u;
+            while (len + need + 1u > new_cap) {
+                new_cap *= 2u;
+            }
+            char *n = (char *)realloc(buf, new_cap);
+            if (!n) {
+                free(buf);
+                return NULL;
+            }
+            buf = n;
+            cap = new_cap;
+        }
+        int n = snprintf(buf + len, cap - len, " %s=\"%s\"", name, value);
+        if (n < 0) {
+            free(buf);
+            return NULL;
+        }
+        len += (size_t)n;
+    }
+    return buf;
+}
+
+static char *svg_wrap_with_group_attrs(const char *content, const char *attrs) {
+    if (!content) {
+        return NULL;
+    }
+    if (!attrs || !*attrs) {
+        return svg_strdup(content);
+    }
+    const char *prefix = "<g";
+    const char *mid = ">";
+    const char *suffix = "</g>";
+    size_t clen = strlen(content);
+    size_t alen = strlen(attrs);
+    size_t total = strlen(prefix) + alen + strlen(mid) + clen + strlen(suffix) + 1u;
+    char *out = (char *)malloc(total);
+    if (!out) {
+        return NULL;
+    }
+    snprintf(out, total, "<g%s>%s</g>", attrs, content);
+    return out;
 }
 
 static void svg_style_apply_property_id(svg_style *style, int prop, const char *value, float base_len,
@@ -1586,6 +2099,28 @@ static void svg_style_apply_property_id(svg_style *style, int prop, const char *
         }
         return;
     }
+    if (prop == SVG_PROP_MARKER || prop == SVG_PROP_MARKER_START ||
+        prop == SVG_PROP_MARKER_MID || prop == SVG_PROP_MARKER_END) {
+        svg_marker *mk = NULL;
+        if (svg_strcasecmp(value, "none") != 0) {
+            char url_id[96];
+            if (svg_parse_url_id(value, url_id, sizeof(url_id))) {
+                mk = defs ? svg_defs_find_marker((svg_defs *)defs, url_id) : NULL;
+            }
+        }
+        if (prop == SVG_PROP_MARKER) {
+            style->marker_start = mk;
+            style->marker_mid = mk;
+            style->marker_end = mk;
+        } else if (prop == SVG_PROP_MARKER_START) {
+            style->marker_start = mk;
+        } else if (prop == SVG_PROP_MARKER_MID) {
+            style->marker_mid = mk;
+        } else {
+            style->marker_end = mk;
+        }
+        return;
+    }
     if (prop == SVG_PROP_FILTER) {
         if (svg_strcasecmp(value, "none") == 0) {
             style->filter = NULL;
@@ -1598,32 +2133,23 @@ static void svg_style_apply_property_id(svg_style *style, int prop, const char *
         return;
     }
     if (prop == SVG_PROP_OPACITY) {
-        char *end = NULL;
-        double v = strtod(value, &end);
-        if (end != value) {
-            if (v < 0.0) v = 0.0;
-            if (v > 1.0) v = 1.0;
-            style->opacity = (float)v;
+        float o = 0.0f;
+        if (svg_parse_opacity_value(value, &o)) {
+            style->opacity = o;
         }
         return;
     }
     if (prop == SVG_PROP_FILL_OPACITY) {
-        char *end = NULL;
-        double v = strtod(value, &end);
-        if (end != value) {
-            if (v < 0.0) v = 0.0;
-            if (v > 1.0) v = 1.0;
-            style->fill_opacity = (float)v;
+        float o = 0.0f;
+        if (svg_parse_opacity_value(value, &o)) {
+            style->fill_opacity = o;
         }
         return;
     }
     if (prop == SVG_PROP_STROKE_OPACITY) {
-        char *end = NULL;
-        double v = strtod(value, &end);
-        if (end != value) {
-            if (v < 0.0) v = 0.0;
-            if (v > 1.0) v = 1.0;
-            style->stroke_opacity = (float)v;
+        float o = 0.0f;
+        if (svg_parse_opacity_value(value, &o)) {
+            style->stroke_opacity = o;
         }
         return;
     }
@@ -1680,6 +2206,22 @@ static void svg_style_apply_property_id(svg_style *style, int prop, const char *
         }
         return;
     }
+    if (prop == SVG_PROP_DOMINANT_BASELINE) {
+        if (svg_strcasecmp(value, "middle") == 0 || svg_strcasecmp(value, "central") == 0) {
+            style->dominant_baseline = 1;
+        } else if (svg_strcasecmp(value, "hanging") == 0 ||
+                   svg_strcasecmp(value, "text-before-edge") == 0 ||
+                   svg_strcasecmp(value, "before-edge") == 0) {
+            style->dominant_baseline = 2;
+        } else if (svg_strcasecmp(value, "alphabetic") == 0 ||
+                   svg_strcasecmp(value, "auto") == 0 ||
+                   svg_strcasecmp(value, "baseline") == 0 ||
+                   svg_strcasecmp(value, "text-after-edge") == 0 ||
+                   svg_strcasecmp(value, "after-edge") == 0) {
+            style->dominant_baseline = 0;
+        }
+        return;
+    }
     if (prop == SVG_PROP_LETTER_SPACING) {
         int ok = 0;
         float v = svg_parse_length(value, base_len, dpi, &ok);
@@ -1693,6 +2235,22 @@ static void svg_style_apply_property_id(svg_style *style, int prop, const char *
         float v = svg_parse_length(value, base_len, dpi, &ok);
         if (ok) {
             style->word_spacing = v;
+        }
+        return;
+    }
+    if (prop == SVG_PROP_DISPLAY) {
+        if (svg_strcasecmp(value, "none") == 0) {
+            style->display_none = 1;
+        } else {
+            style->display_none = 0;
+        }
+        return;
+    }
+    if (prop == SVG_PROP_VISIBILITY) {
+        if (svg_strcasecmp(value, "hidden") == 0 || svg_strcasecmp(value, "collapse") == 0) {
+            style->visibility_hidden = 1;
+        } else if (svg_strcasecmp(value, "visible") == 0) {
+            style->visibility_hidden = 0;
         }
         return;
     }
@@ -2100,6 +2658,15 @@ static void svg_defs_init(svg_defs *defs) {
     defs->paths = NULL;
     defs->path_count = 0;
     defs->path_cap = 0;
+    defs->uses = NULL;
+    defs->use_count = 0;
+    defs->use_cap = 0;
+    defs->symbols = NULL;
+    defs->symbol_count = 0;
+    defs->symbol_cap = 0;
+    defs->markers = NULL;
+    defs->marker_count = 0;
+    defs->marker_cap = 0;
     defs->clips = NULL;
     defs->clip_count = 0;
     defs->clip_cap = 0;
@@ -2130,6 +2697,22 @@ static void svg_defs_free(svg_defs *defs) {
         free(defs->paths[i].id);
         free(defs->paths[i].d);
     }
+    for (int i = 0; i < defs->use_count; i++) {
+        free(defs->uses[i].id);
+        free(defs->uses[i].tag_name);
+        for (int j = 0; j < defs->uses[i].attr_count; j++) {
+            free(defs->uses[i].attrs[j].name);
+            free(defs->uses[i].attrs[j].value);
+        }
+    }
+    for (int i = 0; i < defs->symbol_count; i++) {
+        free(defs->symbols[i].id);
+        free(defs->symbols[i].content);
+    }
+    for (int i = 0; i < defs->marker_count; i++) {
+        free(defs->markers[i].id);
+        free(defs->markers[i].content);
+    }
     for (int i = 0; i < defs->clip_count; i++) {
         free(defs->clips[i].id);
         free(defs->clips[i].href);
@@ -2158,6 +2741,18 @@ static void svg_defs_free(svg_defs *defs) {
     defs->paths = NULL;
     defs->path_count = 0;
     defs->path_cap = 0;
+    free(defs->uses);
+    defs->uses = NULL;
+    defs->use_count = 0;
+    defs->use_cap = 0;
+    free(defs->symbols);
+    defs->symbols = NULL;
+    defs->symbol_count = 0;
+    defs->symbol_cap = 0;
+    free(defs->markers);
+    defs->markers = NULL;
+    defs->marker_count = 0;
+    defs->marker_cap = 0;
     free(defs->clips);
     defs->clips = NULL;
     defs->clip_count = 0;
@@ -2197,8 +2792,16 @@ static void svg_css_free(svg_css *css) {
                     free(part->classes[c]);
                 }
                 free(part->classes);
+                for (int a = 0; a < part->attr_count; a++) {
+                    free(part->attr_names[a]);
+                    free(part->attr_values[a]);
+                }
+                free(part->attr_names);
+                free(part->attr_values);
+                free(part->attr_has_value);
             }
             free(sel->parts);
+            free(sel->combinators);
         }
         free(rule->selectors);
         for (int d = 0; d < rule->decl_count; d++) {
@@ -2399,6 +3002,8 @@ static svg_mask *svg_defs_add_mask(svg_defs *defs, const char *id) {
     svg_matrix_identity(&m->transform);
     svg_matrix_identity(&m->inv_transform);
     m->has_transform = 0;
+    m->type = SVG_MASK_TYPE_LUMINANCE;
+    m->has_type = 0;
     m->content = NULL;
     m->rgba = NULL;
     m->mask_w = 0;
@@ -2513,6 +3118,171 @@ static const svg_path_def *svg_defs_find_path(const svg_defs *defs, const char *
     for (int i = 0; i < defs->path_count; i++) {
         if (defs->paths[i].id && strcmp(defs->paths[i].id, id) == 0) {
             return &defs->paths[i];
+        }
+    }
+    return NULL;
+}
+
+static int svg_tag_is_use_def_shape(const char *local) {
+    if (!local) {
+        return 0;
+    }
+    return strcmp(local, "rect") == 0 || strcmp(local, "circle") == 0 ||
+           strcmp(local, "ellipse") == 0 || strcmp(local, "line") == 0 ||
+           strcmp(local, "polyline") == 0 || strcmp(local, "polygon") == 0 ||
+           strcmp(local, "path") == 0;
+}
+
+static svg_use_def *svg_defs_find_use(svg_defs *defs, const char *id) {
+    if (!defs || !id) {
+        return NULL;
+    }
+    for (int i = 0; i < defs->use_count; i++) {
+        if (defs->uses[i].id && strcmp(defs->uses[i].id, id) == 0) {
+            return &defs->uses[i];
+        }
+    }
+    return NULL;
+}
+
+static svg_use_def *svg_defs_add_use(svg_defs *defs, const svg_tag *tag) {
+    if (!defs || !tag) {
+        return NULL;
+    }
+    const char *id = svg_get_attr(tag, "id");
+    const char *local = svg_local_name(tag->name);
+    if (!id || !*id || !svg_tag_is_use_def_shape(local)) {
+        return NULL;
+    }
+    svg_use_def *ud = svg_defs_find_use(defs, id);
+    if (!ud) {
+        if (defs->use_count >= defs->use_cap) {
+            int new_cap = defs->use_cap ? defs->use_cap * 2 : 16;
+            svg_use_def *n = (svg_use_def *)realloc(defs->uses, (size_t)new_cap * sizeof(svg_use_def));
+            if (!n) {
+                return NULL;
+            }
+            defs->uses = n;
+            defs->use_cap = new_cap;
+        }
+        ud = &defs->uses[defs->use_count++];
+        memset(ud, 0, sizeof(*ud));
+        ud->id = svg_strdup(id);
+    } else {
+        free(ud->tag_name);
+        ud->tag_name = NULL;
+        for (int i = 0; i < ud->attr_count; i++) {
+            free(ud->attrs[i].name);
+            free(ud->attrs[i].value);
+            ud->attrs[i].name = NULL;
+            ud->attrs[i].value = NULL;
+        }
+        ud->attr_count = 0;
+    }
+    ud->tag_name = svg_strdup(local);
+    if (!ud->tag_name) {
+        return NULL;
+    }
+    ud->attr_count = tag->attr_count;
+    if (ud->attr_count > SVG_MAX_ATTR) {
+        ud->attr_count = SVG_MAX_ATTR;
+    }
+    for (int i = 0; i < ud->attr_count; i++) {
+        ud->attrs[i].name = svg_strdup(tag->attrs[i].name ? tag->attrs[i].name : "");
+        ud->attrs[i].value = svg_strdup(tag->attrs[i].value ? tag->attrs[i].value : "");
+        if (!ud->attrs[i].name || !ud->attrs[i].value) {
+            for (int j = 0; j <= i; j++) {
+                free(ud->attrs[j].name);
+                free(ud->attrs[j].value);
+                ud->attrs[j].name = NULL;
+                ud->attrs[j].value = NULL;
+            }
+            ud->attr_count = 0;
+            return NULL;
+        }
+    }
+    return ud;
+}
+
+static svg_symbol *svg_defs_add_symbol(svg_defs *defs, const char *id) {
+    if (!defs || !id || !*id) {
+        return NULL;
+    }
+    for (int i = 0; i < defs->symbol_count; i++) {
+        if (defs->symbols[i].id && strcmp(defs->symbols[i].id, id) == 0) {
+            return &defs->symbols[i];
+        }
+    }
+    if (defs->symbol_count >= defs->symbol_cap) {
+        int new_cap = defs->symbol_cap ? defs->symbol_cap * 2 : 8;
+        svg_symbol *n = (svg_symbol *)realloc(defs->symbols, (size_t)new_cap * sizeof(svg_symbol));
+        if (!n) {
+            return NULL;
+        }
+        defs->symbols = n;
+        defs->symbol_cap = new_cap;
+    }
+    svg_symbol *sym = &defs->symbols[defs->symbol_count++];
+    memset(sym, 0, sizeof(*sym));
+    sym->id = svg_strdup(id);
+    sym->align_x = 0.5f;
+    sym->align_y = 0.5f;
+    return sym;
+}
+
+static const svg_symbol *svg_defs_find_symbol(const svg_defs *defs, const char *id) {
+    if (!defs || !id) {
+        return NULL;
+    }
+    for (int i = 0; i < defs->symbol_count; i++) {
+        if (defs->symbols[i].id && strcmp(defs->symbols[i].id, id) == 0) {
+            return &defs->symbols[i];
+        }
+    }
+    return NULL;
+}
+
+static svg_marker *svg_defs_add_marker(svg_defs *defs, const char *id) {
+    if (!defs || !id || !*id) {
+        return NULL;
+    }
+    for (int i = 0; i < defs->marker_count; i++) {
+        if (defs->markers[i].id && strcmp(defs->markers[i].id, id) == 0) {
+            return &defs->markers[i];
+        }
+    }
+    if (defs->marker_count >= defs->marker_cap) {
+        int new_cap = defs->marker_cap ? defs->marker_cap * 2 : 8;
+        svg_marker *n = (svg_marker *)realloc(defs->markers, (size_t)new_cap * sizeof(svg_marker));
+        if (!n) {
+            return NULL;
+        }
+        defs->markers = n;
+        defs->marker_cap = new_cap;
+    }
+    svg_marker *mk = &defs->markers[defs->marker_count++];
+    memset(mk, 0, sizeof(*mk));
+    mk->id = svg_strdup(id);
+    mk->ref_x = 0.0f;
+    mk->ref_y = 0.0f;
+    mk->marker_w = 3.0f;
+    mk->marker_h = 3.0f;
+    mk->units_stroke_width = 1;
+    mk->orient_auto = 0;
+    mk->orient_auto_start_reverse = 0;
+    mk->orient_angle = 0.0f;
+    mk->align_x = 0.5f;
+    mk->align_y = 0.5f;
+    return mk;
+}
+
+static svg_marker *svg_defs_find_marker(svg_defs *defs, const char *id) {
+    if (!defs || !id) {
+        return NULL;
+    }
+    for (int i = 0; i < defs->marker_count; i++) {
+        if (defs->markers[i].id && strcmp(defs->markers[i].id, id) == 0) {
+            return &defs->markers[i];
         }
     }
     return NULL;
@@ -2637,12 +3407,8 @@ static void svg_stop_apply_style(const char *style, uint32_t *color, int *color_
                     *color_set = 1;
                 }
             } else if (strcmp(name_buf, "stop-opacity") == 0) {
-                char *end = NULL;
-                double v = strtod(value_buf, &end);
-                if (end != value_buf) {
-                    float o = (float)v;
-                    if (o < 0.0f) o = 0.0f;
-                    if (o > 1.0f) o = 1.0f;
+                float o = 0.0f;
+                if (svg_parse_opacity_value(value_buf, &o)) {
                     *opacity = o;
                     *opacity_set = 1;
                 }
@@ -2698,12 +3464,8 @@ static int svg_stop_parse(const svg_tag *tag, float *offset, uint32_t *color) {
     }
     const char *opacity_attr = svg_get_attr(tag, "stop-opacity");
     if (opacity_attr) {
-        char *end = NULL;
-        double v = strtod(opacity_attr, &end);
-        if (end != opacity_attr) {
-            float o = (float)v;
-            if (o < 0.0f) o = 0.0f;
-            if (o > 1.0f) o = 1.0f;
+        float o = 0.0f;
+        if (svg_parse_opacity_value(opacity_attr, &o)) {
             stop_opacity = o;
             opacity_set = 1;
         }
@@ -2832,15 +3594,10 @@ static void svg_parse_gradient_tag(const svg_tag *tag, svg_gradient *g) {
         }
     }
     const char *href = svg_get_attr(tag, "href");
-    if (href && href[0] == '#') {
+    char href_id[96];
+    if (svg_parse_href_id(href, href_id, sizeof(href_id))) {
         free(g->href);
-        g->href = svg_strdup(href + 1);
-    } else if (href && *href) {
-        const char *hash = strchr(href, '#');
-        if (hash && hash[1]) {
-            free(g->href);
-            g->href = svg_strdup(hash + 1);
-        }
+        g->href = svg_strdup(href_id);
     }
     if (g->type == SVG_PAINT_LINEAR_GRADIENT) {
         int has = 0;
@@ -2906,15 +3663,10 @@ static void svg_parse_pattern_tag(const svg_tag *tag, svg_pattern *p) {
         }
     }
     const char *href = svg_get_attr(tag, "href");
-    if (href && href[0] == '#') {
+    char href_id[96];
+    if (svg_parse_href_id(href, href_id, sizeof(href_id))) {
         free(p->href);
-        p->href = svg_strdup(href + 1);
-    } else if (href && *href) {
-        const char *hash = strchr(href, '#');
-        if (hash && hash[1]) {
-            free(p->href);
-            p->href = svg_strdup(hash + 1);
-        }
+        p->href = svg_strdup(href_id);
     }
     int has = 0;
     const char *x = svg_get_attr(tag, "x");
@@ -2994,15 +3746,10 @@ static void svg_parse_clip_tag(const svg_tag *tag, svg_clip_path *c) {
         }
     }
     const char *href = svg_get_attr(tag, "href");
-    if (href && href[0] == '#') {
+    char href_id[96];
+    if (svg_parse_href_id(href, href_id, sizeof(href_id))) {
         free(c->href);
-        c->href = svg_strdup(href + 1);
-    } else if (href && *href) {
-        const char *hash = strchr(href, '#');
-        if (hash && hash[1]) {
-            free(c->href);
-            c->href = svg_strdup(hash + 1);
-        }
+        c->href = svg_strdup(href_id);
     }
 }
 
@@ -3071,15 +3818,10 @@ static void svg_parse_mask_tag(const svg_tag *tag, svg_mask *m) {
         }
     }
     const char *href = svg_get_attr(tag, "href");
-    if (href && href[0] == '#') {
+    char href_id[96];
+    if (svg_parse_href_id(href, href_id, sizeof(href_id))) {
         free(m->href);
-        m->href = svg_strdup(href + 1);
-    } else if (href && *href) {
-        const char *hash = strchr(href, '#');
-        if (hash && hash[1]) {
-            free(m->href);
-            m->href = svg_strdup(hash + 1);
-        }
+        m->href = svg_strdup(href_id);
     }
     int has = 0;
     const char *x = svg_get_attr(tag, "x");
@@ -3092,6 +3834,16 @@ static void svg_parse_mask_tag(const svg_tag *tag, svg_mask *m) {
     if (h && svg_parse_grad_coord(h, &m->height, m->units)) has = 1;
     if (has) {
         m->has_coords = 1;
+    }
+    const char *mask_type = svg_get_attr(tag, "mask-type");
+    if (mask_type) {
+        if (svg_strcasecmp(mask_type, "alpha") == 0) {
+            m->type = SVG_MASK_TYPE_ALPHA;
+            m->has_type = 1;
+        } else if (svg_strcasecmp(mask_type, "luminance") == 0) {
+            m->type = SVG_MASK_TYPE_LUMINANCE;
+            m->has_type = 1;
+        }
     }
 }
 
@@ -3123,6 +3875,76 @@ static void svg_parse_filter_tag(const svg_tag *tag, svg_filter *f) {
     }
 }
 
+static void svg_parse_symbol_tag(const svg_tag *tag, svg_symbol *sym) {
+    if (!tag || !sym) {
+        return;
+    }
+    sym->vb_ok = svg_parse_viewbox(svg_get_attr(tag, "viewBox"),
+                                   &sym->vb_x, &sym->vb_y, &sym->vb_w, &sym->vb_h);
+    sym->preserve_none = 0;
+    sym->align_x = 0.5f;
+    sym->align_y = 0.5f;
+    svg_parse_preserve_aspect_ratio(svg_get_attr(tag, "preserveAspectRatio"),
+                                    &sym->preserve_none, &sym->align_x, &sym->align_y);
+}
+
+static void svg_parse_marker_tag(const svg_tag *tag, svg_marker *mk, float base_len, float dpi) {
+    if (!tag || !mk) {
+        return;
+    }
+    int ok = 0;
+    float v = 0.0f;
+    v = svg_parse_length(svg_get_attr(tag, "refX"), base_len, dpi, &ok);
+    if (ok) {
+        mk->ref_x = v;
+    }
+    v = svg_parse_length(svg_get_attr(tag, "refY"), base_len, dpi, &ok);
+    if (ok) {
+        mk->ref_y = v;
+    }
+    v = svg_parse_length(svg_get_attr(tag, "markerWidth"), base_len, dpi, &ok);
+    if (ok && v > 0.0f) {
+        mk->marker_w = v;
+    }
+    v = svg_parse_length(svg_get_attr(tag, "markerHeight"), base_len, dpi, &ok);
+    if (ok && v > 0.0f) {
+        mk->marker_h = v;
+    }
+    const char *units = svg_get_attr(tag, "markerUnits");
+    if (units) {
+        if (svg_strcasecmp(units, "userspaceonuse") == 0) {
+            mk->units_stroke_width = 0;
+        } else if (svg_strcasecmp(units, "strokewidth") == 0) {
+            mk->units_stroke_width = 1;
+        }
+    }
+    const char *orient = svg_get_attr(tag, "orient");
+    if (orient) {
+        if (svg_strcasecmp(orient, "auto-start-reverse") == 0) {
+            mk->orient_auto = 1;
+            mk->orient_auto_start_reverse = 1;
+        } else if (svg_strcasecmp(orient, "auto") == 0) {
+            mk->orient_auto = 1;
+            mk->orient_auto_start_reverse = 0;
+        } else {
+            char *end = NULL;
+            double a = strtod(orient, &end);
+            if (end != orient) {
+                mk->orient_auto = 0;
+                mk->orient_auto_start_reverse = 0;
+                mk->orient_angle = (float)a;
+            }
+        }
+    }
+    mk->vb_ok = svg_parse_viewbox(svg_get_attr(tag, "viewBox"),
+                                  &mk->vb_x, &mk->vb_y, &mk->vb_w, &mk->vb_h);
+    mk->preserve_none = 0;
+    mk->align_x = 0.5f;
+    mk->align_y = 0.5f;
+    svg_parse_preserve_aspect_ratio(svg_get_attr(tag, "preserveAspectRatio"),
+                                    &mk->preserve_none, &mk->align_x, &mk->align_y);
+}
+
 static void svg_mask_inherit(svg_mask *m, svg_defs *defs) {
     if (!m || !m->href || !defs) {
         return;
@@ -3141,6 +3963,9 @@ static void svg_mask_inherit(svg_mask *m, svg_defs *defs) {
         m->transform = ref->transform;
         m->inv_transform = ref->inv_transform;
         m->has_transform = ref->has_transform;
+    }
+    if (!m->has_type) {
+        m->type = ref->type;
     }
     if (!m->has_coords) {
         m->x = ref->x;
@@ -3285,12 +4110,23 @@ static int svg_css_parse_selector(const char *s, svg_selector *out) {
     svg_selector sel;
     memset(&sel, 0, sizeof(sel));
     const char *p = s;
+    int pending_combinator = 0; /* 0: descendant, 1: child (>), 2: adjacent (+), 3: sibling (~) */
     while (*p) {
         while (isspace((unsigned char)*p)) {
             p++;
         }
         if (!*p) {
             break;
+        }
+        if (*p == '>' || *p == '+' || *p == '~') {
+            pending_combinator = (*p == '>') ? 1 : (*p == '+' ? 2 : 3);
+            p++;
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (!*p) {
+                break;
+            }
         }
         svg_selector_part part;
         memset(&part, 0, sizeof(part));
@@ -3339,17 +4175,122 @@ static int svg_css_parse_selector(const char *s, svg_selector *out) {
                 sel.specificity += 10;
             }
         }
+        while (*p == '[') {
+            p++;
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            const char *nstart = p;
+            while (*p && (isalnum((unsigned char)*p) || *p == '-' || *p == '_' || *p == ':')) {
+                p++;
+            }
+            if (p == nstart) {
+                break;
+            }
+            char *aname = svg_strndup(nstart, (size_t)(p - nstart));
+            if (!aname) {
+                return 0;
+            }
+            svg_lowercase(aname);
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            int has_value = 0;
+            char *avalue = NULL;
+            if (*p == '=') {
+                has_value = 1;
+                p++;
+                while (isspace((unsigned char)*p)) {
+                    p++;
+                }
+                if (*p == '"' || *p == '\'') {
+                    char q = *p++;
+                    const char *vstart = p;
+                    while (*p && *p != q) {
+                        p++;
+                    }
+                    avalue = svg_strndup(vstart, (size_t)(p - vstart));
+                    if (*p == q) {
+                        p++;
+                    }
+                } else {
+                    const char *vstart = p;
+                    while (*p && *p != ']' && !isspace((unsigned char)*p)) {
+                        p++;
+                    }
+                    avalue = svg_strndup(vstart, (size_t)(p - vstart));
+                }
+                if (!avalue) {
+                    free(aname);
+                    return 0;
+                }
+            }
+            while (isspace((unsigned char)*p)) {
+                p++;
+            }
+            if (*p == ']') {
+                p++;
+            }
+            int new_count = part.attr_count + 1;
+            char **names = (char **)malloc((size_t)new_count * sizeof(char *));
+            char **values = (char **)malloc((size_t)new_count * sizeof(char *));
+            uint8_t *flags = (uint8_t *)malloc((size_t)new_count * sizeof(uint8_t));
+            if (!names || !values || !flags) {
+                free(aname);
+                free(avalue);
+                free(names);
+                free(values);
+                free(flags);
+                return 0;
+            }
+            for (int ai = 0; ai < part.attr_count; ai++) {
+                names[ai] = part.attr_names[ai];
+                values[ai] = part.attr_values[ai];
+                flags[ai] = part.attr_has_value[ai];
+            }
+            free(part.attr_names);
+            free(part.attr_values);
+            free(part.attr_has_value);
+            part.attr_names = names;
+            part.attr_values = values;
+            part.attr_has_value = flags;
+            part.attr_names[part.attr_count] = aname;
+            part.attr_values[part.attr_count] = avalue;
+            part.attr_has_value[part.attr_count] = (uint8_t)has_value;
+            part.attr_count = new_count;
+            sel.specificity += 10;
+            matched = 1;
+        }
         if (!matched) {
             break;
         }
-        svg_selector_part *parts = (svg_selector_part *)realloc(sel.parts, (size_t)(sel.part_count + 1) * sizeof(svg_selector_part));
+        int old_count = sel.part_count;
+        svg_selector_part *parts = (svg_selector_part *)realloc(sel.parts, (size_t)(old_count + 1) * sizeof(svg_selector_part));
         if (!parts) {
             return 0;
         }
         sel.parts = parts;
-        sel.parts[sel.part_count++] = part;
+        sel.parts[old_count] = part;
+        sel.part_count = old_count + 1;
+        if (old_count > 0) {
+            int *combs = (int *)realloc(sel.combinators, (size_t)old_count * sizeof(int));
+            if (!combs) {
+                return 0;
+            }
+            sel.combinators = combs;
+            sel.combinators[old_count - 1] = pending_combinator;
+        }
+        pending_combinator = 0;
+        int saw_space = 0;
         while (isspace((unsigned char)*p)) {
+            saw_space = 1;
             p++;
+        }
+        if (*p == '>' || *p == '+' || *p == '~') {
+            pending_combinator = (*p == '>') ? 1 : (*p == '+' ? 2 : 3);
+            p++;
+        } else if (saw_space) {
+            pending_combinator = 0;
         }
     }
     if (sel.part_count == 0) {
@@ -3514,8 +4455,16 @@ static int svg_css_parse(svg_css *css, const char *text) {
                         free(part->classes[c]);
                     }
                     free(part->classes);
+                    for (int a = 0; a < part->attr_count; a++) {
+                        free(part->attr_names[a]);
+                        free(part->attr_values[a]);
+                    }
+                    free(part->attr_names);
+                    free(part->attr_values);
+                    free(part->attr_has_value);
                 }
                 free(sel->parts);
+                free(sel->combinators);
             }
             free(rule.selectors);
             for (int d = 0; d < rule.decl_count; d++) {
@@ -3568,26 +4517,97 @@ static int svg_selector_part_matches(const svg_selector_part *part, const svg_el
             return 0;
         }
     }
+    for (int i = 0; i < part->attr_count; i++) {
+        const char *match_value = NULL;
+        int found = 0;
+        for (int a = 0; a < info->attr_count; a++) {
+            const char *aname = svg_local_name(info->attr_names[a]);
+            if (aname && svg_strcasecmp(aname, part->attr_names[i]) == 0) {
+                found = 1;
+                match_value = info->attr_values[a];
+                break;
+            }
+        }
+        if (!found) {
+            return 0;
+        }
+        if (part->attr_has_value[i]) {
+            if (!match_value || strcmp(match_value, part->attr_values[i]) != 0) {
+                return 0;
+            }
+        }
+    }
     return 1;
 }
 
-static int svg_selector_matches(const svg_selector *sel, const svg_elem_info *stack, int depth) {
+static int svg_selector_matches(const svg_selector *sel, const svg_elem_info *stack, int depth,
+                                const svg_elem_info *siblings, int sibling_count) {
     if (!sel || !stack || depth <= 0) {
         return 0;
     }
     int part_idx = sel->part_count - 1;
-    int elem_idx = depth - 1;
-    while (part_idx >= 0 && elem_idx >= 0) {
-        if (svg_selector_part_matches(&sel->parts[part_idx], &stack[elem_idx])) {
-            part_idx--;
-        }
-        elem_idx--;
+    if (!svg_selector_part_matches(&sel->parts[part_idx], &stack[depth - 1])) {
+        return 0;
     }
-    return part_idx < 0;
+    part_idx--;
+    int ancestor_idx = depth - 2;
+    while (part_idx >= 0) {
+        int comb = 0;
+        if (sel->combinators) {
+            comb = sel->combinators[part_idx];
+        }
+        if (comb == 2 || comb == 3) {
+            int found = 0;
+            if (siblings && sibling_count > 0) {
+                if (comb == 2) {
+                    const svg_elem_info *prev = &siblings[sibling_count - 1];
+                    found = svg_selector_part_matches(&sel->parts[part_idx], prev);
+                } else {
+                    for (int i = sibling_count - 1; i >= 0; i--) {
+                        if (svg_selector_part_matches(&sel->parts[part_idx], &siblings[i])) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!found) {
+                return 0;
+            }
+            part_idx--;
+            continue;
+        }
+        if (comb == 1) {
+            if (ancestor_idx < 0) {
+                return 0;
+            }
+            if (!svg_selector_part_matches(&sel->parts[part_idx], &stack[ancestor_idx])) {
+                return 0;
+            }
+            ancestor_idx--;
+            part_idx--;
+            continue;
+        }
+        int found_idx = -1;
+        for (int i = ancestor_idx; i >= 0; i--) {
+            if (svg_selector_part_matches(&sel->parts[part_idx], &stack[i])) {
+                found_idx = i;
+                break;
+            }
+        }
+        if (found_idx < 0) {
+            return 0;
+        }
+        ancestor_idx = found_idx - 1;
+        part_idx--;
+    }
+    return 1;
 }
 
 static void svg_css_apply(svg_style *style, const svg_css *css, const svg_defs *defs,
-                          const svg_elem_info *stack, int depth, float base_len, float dpi) {
+                          const svg_elem_info *stack, int depth,
+                          const svg_elem_info *siblings, int sibling_count,
+                          float base_len, float dpi) {
     if (!style || !css || css->rule_count == 0 || !stack || depth <= 0) {
         return;
     }
@@ -3601,7 +4621,7 @@ static void svg_css_apply(svg_style *style, const svg_css *css, const svg_defs *
         const svg_css_rule *rule = &css->rules[r];
         for (int s = 0; s < rule->selector_count; s++) {
             const svg_selector *sel = &rule->selectors[s];
-            if (!svg_selector_matches(sel, stack, depth)) {
+            if (!svg_selector_matches(sel, stack, depth, siblings, sibling_count)) {
                 continue;
             }
             int spec = sel->specificity;
@@ -3677,6 +4697,9 @@ static int svg_parse_preamble(const unsigned char *data, size_t size, svg_preamb
     svg_gradient *current_grad = NULL;
     while (svg_next_tag(&p, &tag)) {
         const char *local = svg_local_name(tag.name);
+        if (!tag.is_end) {
+            svg_defs_add_use(defs, &tag);
+        }
         if (!tag.is_end && !pre->found_svg && strcmp(local, "svg") == 0) {
             pre->found_svg = 1;
             const char *w = svg_get_attr(&tag, "width");
@@ -3684,24 +4707,8 @@ static int svg_parse_preamble(const unsigned char *data, size_t size, svg_preamb
             pre->width_attr = svg_parse_length(w, 0.0f, dpi, &pre->width_ok);
             pre->height_attr = svg_parse_length(h, 0.0f, dpi, &pre->height_ok);
             pre->vb_ok = svg_parse_viewbox(svg_get_attr(&tag, "viewBox"), &pre->vb_x, &pre->vb_y, &pre->vb_w, &pre->vb_h);
-            const char *pa = svg_get_attr(&tag, "preserveAspectRatio");
-            if (pa) {
-                if (strstr(pa, "none")) {
-                    pre->preserve_none = 1;
-                } else {
-                    const char *tok = pa;
-                    while (*tok && isspace((unsigned char)*tok)) tok++;
-                    if (strncmp(tok, "xMinYMin", 8) == 0) { pre->align_x = 0.0f; pre->align_y = 0.0f; }
-                    else if (strncmp(tok, "xMidYMin", 8) == 0) { pre->align_x = 0.5f; pre->align_y = 0.0f; }
-                    else if (strncmp(tok, "xMaxYMin", 8) == 0) { pre->align_x = 1.0f; pre->align_y = 0.0f; }
-                    else if (strncmp(tok, "xMinYMid", 8) == 0) { pre->align_x = 0.0f; pre->align_y = 0.5f; }
-                    else if (strncmp(tok, "xMidYMid", 8) == 0) { pre->align_x = 0.5f; pre->align_y = 0.5f; }
-                    else if (strncmp(tok, "xMaxYMid", 8) == 0) { pre->align_x = 1.0f; pre->align_y = 0.5f; }
-                    else if (strncmp(tok, "xMinYMax", 8) == 0) { pre->align_x = 0.0f; pre->align_y = 1.0f; }
-                    else if (strncmp(tok, "xMidYMax", 8) == 0) { pre->align_x = 0.5f; pre->align_y = 1.0f; }
-                    else if (strncmp(tok, "xMaxYMax", 8) == 0) { pre->align_x = 1.0f; pre->align_y = 1.0f; }
-                }
-            }
+            svg_parse_preserve_aspect_ratio(svg_get_attr(&tag, "preserveAspectRatio"),
+                                            &pre->preserve_none, &pre->align_x, &pre->align_y);
         }
         if (!tag.is_end && (strcmp(local, "lineargradient") == 0 || strcmp(local, "radialgradient") == 0)) {
             const char *id = svg_get_attr(&tag, "id");
@@ -3739,6 +4746,51 @@ static int svg_parse_preamble(const unsigned char *data, size_t size, svg_preamb
                     if (pat) {
                         free(pat->content);
                         pat->content = svg_strdup(p);
+                    }
+                    if (after) {
+                        p = after;
+                    }
+                }
+            }
+            continue;
+        }
+        if (!tag.is_end && strcmp(local, "symbol") == 0) {
+            const char *id = svg_get_attr(&tag, "id");
+            svg_symbol *sym = svg_defs_add_symbol(defs, id);
+            if (sym) {
+                svg_parse_symbol_tag(&tag, sym);
+            }
+            if (!tag.is_self_closing) {
+                char *after = NULL;
+                char *close = svg_find_close_tag(p, "symbol", &after);
+                if (close) {
+                    *close = '\0';
+                    if (sym) {
+                        free(sym->content);
+                        sym->content = svg_strdup(p);
+                    }
+                    if (after) {
+                        p = after;
+                    }
+                }
+            }
+            continue;
+        }
+        if (!tag.is_end && strcmp(local, "marker") == 0) {
+            const char *id = svg_get_attr(&tag, "id");
+            svg_marker *mk = svg_defs_add_marker(defs, id);
+            if (mk) {
+                float base_len = pre->vb_ok ? ((pre->vb_w + pre->vb_h) * 0.5f) : 512.0f;
+                svg_parse_marker_tag(&tag, mk, base_len, dpi);
+            }
+            if (!tag.is_self_closing) {
+                char *after = NULL;
+                char *close = svg_find_close_tag(p, "marker", &after);
+                if (close) {
+                    *close = '\0';
+                    if (mk) {
+                        free(mk->content);
+                        mk->content = svg_strdup(p);
                     }
                     if (after) {
                         p = after;
@@ -4830,10 +5882,14 @@ static uint8_t svg_sample_mask_alpha(svg_style *style, const svg_render_ctx *ctx
                 return 0;
             }
             size_t idx = ((size_t)sy * style->mask->mask_w + (size_t)sx) * 4u;
-            uint8_t mr = style->mask->rgba[idx + 0];
-            uint8_t mg = style->mask->rgba[idx + 1];
-            uint8_t mb = style->mask->rgba[idx + 2];
-            uint8_t ma = (uint8_t)((mr * 54u + mg * 183u + mb * 19u + 128u) >> 8);
+            uint8_t ma = style->mask->rgba[idx + 3];
+            if (style->mask->type == SVG_MASK_TYPE_LUMINANCE) {
+                uint8_t mr = style->mask->rgba[idx + 0];
+                uint8_t mg = style->mask->rgba[idx + 1];
+                uint8_t mb = style->mask->rgba[idx + 2];
+                uint8_t lum = (uint8_t)((mr * 54u + mg * 183u + mb * 19u + 128u) >> 8);
+                ma = (uint8_t)((lum * ma) / 255u);
+            }
             alpha = (uint8_t)((alpha * ma) / 255u);
         }
     }
@@ -5871,13 +6927,7 @@ static int svg_parse_filter_ops(const char *content, svg_filter_op **out_ops, in
             float opacity = 1.0f;
             const char *fo = svg_get_attr(&tag, "flood-opacity");
             if (fo) {
-                char *end = NULL;
-                double v = strtod(fo, &end);
-                if (end != fo) {
-                    if (v < 0.0) v = 0.0;
-                    if (v > 1.0) v = 1.0;
-                    opacity = (float)v;
-                }
+                svg_parse_opacity_value(fo, &opacity);
             }
             uint8_t a = (uint8_t)(color & 0xFFu);
             float alpha = (a / 255.0f) * opacity;
@@ -5910,6 +6960,9 @@ static int svg_parse_filter_ops(const char *content, svg_filter_op **out_ops, in
                 else if (svg_strcasecmp(mode, "screen") == 0) blend_mode = SVG_BLEND_SCREEN;
                 else if (svg_strcasecmp(mode, "darken") == 0) blend_mode = SVG_BLEND_DARKEN;
                 else if (svg_strcasecmp(mode, "lighten") == 0) blend_mode = SVG_BLEND_LIGHTEN;
+                else if (svg_strcasecmp(mode, "overlay") == 0) blend_mode = SVG_BLEND_OVERLAY;
+                else if (svg_strcasecmp(mode, "hard-light") == 0) blend_mode = SVG_BLEND_HARDLIGHT;
+                else if (svg_strcasecmp(mode, "soft-light") == 0) blend_mode = SVG_BLEND_SOFTLIGHT;
             }
             if (*out_count >= cap) {
                 int new_cap = cap ? cap * 2 : 8;
@@ -6743,6 +7796,24 @@ static void svg_apply_filter_ops(const svg_filter *filter, svg_render_ctx *ctx, 
                         br = fmaxf(r1, r2);
                         bg = fmaxf(g1, g2);
                         bb = fmaxf(b1, b2);
+                    } else if (op->mode == SVG_BLEND_OVERLAY) {
+                        br = (r1 <= 0.5f) ? (2.0f * r1 * r2) : (1.0f - 2.0f * (1.0f - r1) * (1.0f - r2));
+                        bg = (g1 <= 0.5f) ? (2.0f * g1 * g2) : (1.0f - 2.0f * (1.0f - g1) * (1.0f - g2));
+                        bb = (b1 <= 0.5f) ? (2.0f * b1 * b2) : (1.0f - 2.0f * (1.0f - b1) * (1.0f - b2));
+                    } else if (op->mode == SVG_BLEND_HARDLIGHT) {
+                        br = (r2 <= 0.5f) ? (2.0f * r1 * r2) : (1.0f - 2.0f * (1.0f - r1) * (1.0f - r2));
+                        bg = (g2 <= 0.5f) ? (2.0f * g1 * g2) : (1.0f - 2.0f * (1.0f - g1) * (1.0f - g2));
+                        bb = (b2 <= 0.5f) ? (2.0f * b1 * b2) : (1.0f - 2.0f * (1.0f - b1) * (1.0f - b2));
+                    } else if (op->mode == SVG_BLEND_SOFTLIGHT) {
+                        float gr = (r1 <= 0.25f) ? (((16.0f * r1 - 12.0f) * r1 + 4.0f) * r1) : sqrtf(fmaxf(r1, 0.0f));
+                        float gg = (g1 <= 0.25f) ? (((16.0f * g1 - 12.0f) * g1 + 4.0f) * g1) : sqrtf(fmaxf(g1, 0.0f));
+                        float gb = (b1 <= 0.25f) ? (((16.0f * b1 - 12.0f) * b1 + 4.0f) * b1) : sqrtf(fmaxf(b1, 0.0f));
+                        br = (r2 <= 0.5f) ? (r1 - (1.0f - 2.0f * r2) * r1 * (1.0f - r1))
+                                          : (r1 + (2.0f * r2 - 1.0f) * (gr - r1));
+                        bg = (g2 <= 0.5f) ? (g1 - (1.0f - 2.0f * g2) * g1 * (1.0f - g1))
+                                          : (g1 + (2.0f * g2 - 1.0f) * (gg - g1));
+                        bb = (b2 <= 0.5f) ? (b1 - (1.0f - 2.0f * b2) * b1 * (1.0f - b1))
+                                          : (b1 + (2.0f * b2 - 1.0f) * (gb - b1));
                     }
                     float c1r = (float)in1[idx + 0] / 255.0f;
                     float c1g = (float)in1[idx + 1] / 255.0f;
@@ -7477,13 +8548,78 @@ static const uint8_t *svg_get_glyph(unsigned char c) {
     return svg_font8x8_basic['?'];
 }
 
-static float svg_text_advance(const svg_style *style, unsigned char c) {
+static int svg_utf8_decode_one(const char *s, uint32_t *cp, int *len) {
+    if (!s || !*s || !cp || !len) {
+        return 0;
+    }
+    unsigned char c0 = (unsigned char)s[0];
+    if (c0 < 0x80) {
+        *cp = c0;
+        *len = 1;
+        return 1;
+    }
+    if ((c0 & 0xE0u) == 0xC0u) {
+        unsigned char c1 = (unsigned char)s[1];
+        if ((c1 & 0xC0u) != 0x80u) return 0;
+        *cp = ((uint32_t)(c0 & 0x1Fu) << 6) | (uint32_t)(c1 & 0x3Fu);
+        *len = 2;
+        return 1;
+    }
+    if ((c0 & 0xF0u) == 0xE0u) {
+        unsigned char c1 = (unsigned char)s[1];
+        unsigned char c2 = (unsigned char)s[2];
+        if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u) return 0;
+        *cp = ((uint32_t)(c0 & 0x0Fu) << 12) | ((uint32_t)(c1 & 0x3Fu) << 6) | (uint32_t)(c2 & 0x3Fu);
+        *len = 3;
+        return 1;
+    }
+    if ((c0 & 0xF8u) == 0xF0u) {
+        unsigned char c1 = (unsigned char)s[1];
+        unsigned char c2 = (unsigned char)s[2];
+        unsigned char c3 = (unsigned char)s[3];
+        if ((c1 & 0xC0u) != 0x80u || (c2 & 0xC0u) != 0x80u || (c3 & 0xC0u) != 0x80u) return 0;
+        *cp = ((uint32_t)(c0 & 0x07u) << 18) | ((uint32_t)(c1 & 0x3Fu) << 12) |
+              ((uint32_t)(c2 & 0x3Fu) << 6) | (uint32_t)(c3 & 0x3Fu);
+        *len = 4;
+        return 1;
+    }
+    return 0;
+}
+
+static const uint8_t svg_glyph_bullet[8] = {
+    0x00, 0x00, 0x18, 0x3C, 0x3C, 0x18, 0x00, 0x00
+};
+
+static const uint8_t *svg_get_glyph_codepoint(uint32_t cp) {
+    if (cp < 128u) {
+        return svg_get_glyph((unsigned char)cp);
+    }
+    if (cp == 0x2022u || cp == 0x00B7u) {
+        return svg_glyph_bullet;
+    }
+    return svg_font8x8_basic['?'];
+}
+
+static float svg_text_advance(const svg_style *style, uint32_t cp) {
     float base_w = style->font_size * 0.6f;
     float adv = base_w + style->letter_spacing;
-    if (c == ' ') {
+    if (cp == (uint32_t)' ') {
         adv += style->word_spacing;
     }
     return adv;
+}
+
+static float svg_text_baseline_offset(const svg_style *style) {
+    if (!style) {
+        return 0.0f;
+    }
+    if (style->dominant_baseline == 1) {
+        return style->font_size * 0.5f;
+    }
+    if (style->dominant_baseline == 2) {
+        return style->font_size;
+    }
+    return 0.0f;
 }
 
 static float svg_measure_line(const svg_style *style, const char *text, size_t len) {
@@ -7491,15 +8627,22 @@ static float svg_measure_line(const svg_style *style, const char *text, size_t l
         return 0.0f;
     }
     float width = 0.0f;
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)text[i];
-        if (c == '\n') {
-            break;
-        }
-        if (c < 32) {
+    size_t i = 0;
+    while (i < len) {
+        uint32_t cp = 0;
+        int n = 0;
+        if (!svg_utf8_decode_one(text + i, &cp, &n) || n <= 0 || i + (size_t)n > len) {
+            i++;
             continue;
         }
-        width += svg_text_advance(style, c);
+        i += (size_t)n;
+        if (cp == (uint32_t)'\n') {
+            break;
+        }
+        if (cp < 32u) {
+            continue;
+        }
+        width += svg_text_advance(style, cp);
     }
     return width;
 }
@@ -7616,6 +8759,7 @@ static void svg_render_text_run(svg_render_ctx *ctx, const svg_style *style, con
     float line_height = style->font_size * 1.2f;
     float scale_x = style->font_size * 0.6f / 8.0f;
     float scale_y = style->font_size / 8.0f;
+    float baseline_off = svg_text_baseline_offset(style);
     const char *p = text;
     while (*p) {
         const char *line_start = p;
@@ -7630,26 +8774,34 @@ static void svg_render_text_run(svg_render_ctx *ctx, const svg_style *style, con
         } else if (style->text_anchor == 2) {
             line_x -= line_width;
         }
+        float line_y = *pen_y + baseline_off;
         if (bbox_out) {
-            svg_bbox_add_rect(bbox_out, line_x, *pen_y - style->font_size, line_width, style->font_size);
+            svg_bbox_add_rect(bbox_out, line_x, line_y - style->font_size, line_width, style->font_size);
         }
         svg_bbox bbox;
         bbox.x = line_x;
-        bbox.y = *pen_y - style->font_size;
+        bbox.y = line_y - style->font_size;
         bbox.w = line_width;
         bbox.h = style->font_size;
         float x = line_x;
-        for (size_t i = 0; i < line_len; i++) {
-            unsigned char c = (unsigned char)line_start[i];
-            if (c < 32) {
+        size_t i = 0;
+        while (i < line_len) {
+            uint32_t cp = 0;
+            int n = 0;
+            if (!svg_utf8_decode_one(line_start + i, &cp, &n) || n <= 0 || i + (size_t)n > line_len) {
+                i++;
                 continue;
             }
-            const uint8_t *glyph = svg_get_glyph(c);
-            svg_draw_glyph(ctx, style, m, &bbox, glyph, x, *pen_y, scale_x, scale_y);
-            if (style->bold) {
-                svg_draw_glyph(ctx, style, m, &bbox, glyph, x + scale_x * 0.8f, *pen_y, scale_x, scale_y);
+            i += (size_t)n;
+            if (cp < 32u) {
+                continue;
             }
-            x += svg_text_advance(style, c);
+            const uint8_t *glyph = svg_get_glyph_codepoint(cp);
+            svg_draw_glyph(ctx, style, m, &bbox, glyph, x, line_y, scale_x, scale_y);
+            if (style->bold) {
+                svg_draw_glyph(ctx, style, m, &bbox, glyph, x + scale_x * 0.8f, line_y, scale_x, scale_y);
+            }
+            x += svg_text_advance(style, cp);
         }
         *pen_x = x;
         if (*p == '\n') {
@@ -7672,16 +8824,23 @@ static void svg_render_text_run_path(svg_render_ctx *ctx, const svg_style *style
     }
     float scale_x = style->font_size * 0.6f / 8.0f;
     float scale_y = style->font_size / 8.0f;
+    float baseline_off = svg_text_baseline_offset(style);
     const char *p = text;
     while (*p) {
-        unsigned char c = (unsigned char)*p++;
-        if (c == '\n') {
-            break;
-        }
-        if (c < 32) {
+        uint32_t cp = 0;
+        int n = 0;
+        if (!svg_utf8_decode_one(p, &cp, &n) || n <= 0) {
+            p++;
             continue;
         }
-        float adv = svg_text_advance(style, c);
+        p += n;
+        if (cp == (uint32_t)'\n') {
+            break;
+        }
+        if (cp < 32u) {
+            continue;
+        }
+        float adv = svg_text_advance(style, cp);
         float sample_pos = tp->pos + adv * 0.5f;
         float gx = 0.0f;
         float gy = 0.0f;
@@ -7695,10 +8854,11 @@ static void svg_render_text_run_path(svg_render_ctx *ctx, const svg_style *style
         svg_matrix_translate(&local, gx, gy);
         svg_matrix glyph_m;
         svg_matrix_multiply(m, &local, &glyph_m);
-        const uint8_t *glyph = svg_get_glyph(c);
-        svg_draw_glyph(ctx, style, &glyph_m, &tp->bbox, glyph, 0.0f, style->font_size, scale_x, scale_y);
+        const uint8_t *glyph = svg_get_glyph_codepoint(cp);
+        svg_draw_glyph(ctx, style, &glyph_m, &tp->bbox, glyph, 0.0f, style->font_size + baseline_off, scale_x, scale_y);
         if (style->bold) {
-            svg_draw_glyph(ctx, style, &glyph_m, &tp->bbox, glyph, scale_x * 0.8f, style->font_size, scale_x, scale_y);
+            svg_draw_glyph(ctx, style, &glyph_m, &tp->bbox, glyph, scale_x * 0.8f,
+                           style->font_size + baseline_off, scale_x, scale_y);
         }
         tp->pos += adv;
     }
@@ -8679,9 +9839,7 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
             svg_style next_style = cur_style;
             svg_apply_presentation_attrs(&next_style, &inner, base_len, dpi, defs);
             svg_elem_info tspan_info;
-            tspan_info.tag = lname;
-            tspan_info.id = svg_get_attr(&inner, "id");
-            tspan_info.class_attr = svg_get_attr(&inner, "class");
+            svg_elem_info_from_tag(&tspan_info, lname, &inner);
             svg_elem_info tmp_stack[SVG_MAX_DEPTH];
             int tmp_depth = stack_depth < SVG_MAX_DEPTH ? stack_depth : SVG_MAX_DEPTH;
             for (int i = 0; i < tmp_depth; i++) {
@@ -8690,7 +9848,7 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
             if (tmp_depth < SVG_MAX_DEPTH) {
                 tmp_stack[tmp_depth++] = tspan_info;
             }
-            svg_css_apply(&next_style, css, defs, tmp_stack, tmp_depth, base_len, dpi);
+            svg_css_apply(&next_style, css, defs, tmp_stack, tmp_depth, NULL, 0, base_len, dpi);
             svg_apply_inline_style_attr(&next_style, &inner, base_len, dpi, defs);
             preserve = svg_xml_space_preserve(&inner, preserve);
             svg_matrix nm = cur_m;
@@ -8728,9 +9886,7 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
             svg_style next_style = cur_style;
             svg_apply_presentation_attrs(&next_style, &inner, base_len, dpi, defs);
             svg_elem_info tpath_info;
-            tpath_info.tag = lname;
-            tpath_info.id = svg_get_attr(&inner, "id");
-            tpath_info.class_attr = svg_get_attr(&inner, "class");
+            svg_elem_info_from_tag(&tpath_info, lname, &inner);
             svg_elem_info tmp_stack[SVG_MAX_DEPTH];
             int tmp_depth = stack_depth < SVG_MAX_DEPTH ? stack_depth : SVG_MAX_DEPTH;
             for (int i = 0; i < tmp_depth; i++) {
@@ -8739,7 +9895,7 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
             if (tmp_depth < SVG_MAX_DEPTH) {
                 tmp_stack[tmp_depth++] = tpath_info;
             }
-            svg_css_apply(&next_style, css, defs, tmp_stack, tmp_depth, base_len, dpi);
+            svg_css_apply(&next_style, css, defs, tmp_stack, tmp_depth, NULL, 0, base_len, dpi);
             svg_apply_inline_style_attr(&next_style, &inner, base_len, dpi, defs);
             preserve = svg_xml_space_preserve(&inner, preserve);
             cur_style = next_style;
@@ -8755,14 +9911,7 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
                 }
                 char idbuf[96];
                 idbuf[0] = '\0';
-                if (href && href[0] == '#') {
-                    snprintf(idbuf, sizeof(idbuf), "%s", href + 1);
-                } else if (href && *href) {
-                    const char *hash = strchr(href, '#');
-                    if (hash && hash[1]) {
-                        snprintf(idbuf, sizeof(idbuf), "%s", hash + 1);
-                    }
-                }
+                svg_parse_href_id(href, idbuf, sizeof(idbuf));
                 const svg_path_def *pd = (idbuf[0] && defs) ? svg_defs_find_path(defs, idbuf) : NULL;
                 if (pd && pd->d) {
                     if (svg_parse_path(pd->d, &tp->segs) && tp->segs.stroke_count > 0) {
@@ -8878,8 +10027,214 @@ static void svg_render_text_element(svg_render_ctx *ctx, const svg_style *style,
     }
 }
 
+static int svg_render_transformed_snippet(svg_render_ctx *ctx, const char *content,
+                                          const svg_matrix *gm, float dpi) {
+    if (!ctx || !content || !*content || !gm) {
+        return 0;
+    }
+    float vb_x = ctx->vb_x;
+    float vb_y = ctx->vb_y;
+    float vb_w = ctx->vb_w > 0.0f ? ctx->vb_w : (float)ctx->width;
+    float vb_h = ctx->vb_h > 0.0f ? ctx->vb_h : (float)ctx->height;
+    int header_len = snprintf(NULL, 0,
+                              "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.6f\" height=\"%.6f\" "
+                              "viewBox=\"%.6f %.6f %.6f %.6f\"><g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">",
+                              vb_w, vb_h, vb_x, vb_y, vb_w, vb_h,
+                              gm->a, gm->b, gm->c, gm->d, gm->e, gm->f);
+    if (header_len <= 0) {
+        return 0;
+    }
+    const char *footer = "</g></svg>";
+    size_t content_len = strlen(content);
+    size_t total = (size_t)header_len + content_len + strlen(footer) + 1u;
+    char *svg = (char *)malloc(total);
+    if (!svg) {
+        return 0;
+    }
+    char *dst = svg;
+    dst += (size_t)snprintf(dst, (size_t)header_len + 1u,
+                            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%.6f\" height=\"%.6f\" "
+                            "viewBox=\"%.6f %.6f %.6f %.6f\"><g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">",
+                            vb_w, vb_h, vb_x, vb_y, vb_w, vb_h,
+                            gm->a, gm->b, gm->c, gm->d, gm->e, gm->f);
+    memcpy(dst, content, content_len);
+    dst += content_len;
+    memcpy(dst, footer, strlen(footer));
+    dst += strlen(footer);
+    *dst = '\0';
+
+    cupidimage_svg_options opts;
+    opts.width = ctx->width;
+    opts.height = ctx->height;
+    opts.scale = 1.0f;
+    opts.dpi = dpi;
+    opts.supersampling = (uint8_t)ctx->ss;
+    opts.background_alpha = 0;
+
+    svg_render_ctx tmp_ctx;
+    memset(&tmp_ctx, 0, sizeof(tmp_ctx));
+    char errbuf[128];
+    int ok = svg_render(&tmp_ctx, (const unsigned char *)svg, strlen(svg), errbuf, sizeof(errbuf), &opts);
+    free(svg);
+    if (!ok || !tmp_ctx.hi_rgba) {
+        free(tmp_ctx.hi_rgba);
+        return 0;
+    }
+    svg_composite_buffer(ctx, tmp_ctx.hi_rgba);
+    free(tmp_ctx.hi_rgba);
+    return 1;
+}
+
+static float svg_segment_angle_deg(const svg_segment *seg) {
+    if (!seg) {
+        return 0.0f;
+    }
+    return atan2f(seg->y1 - seg->y0, seg->x1 - seg->x0) * (180.0f / (float)M_PI);
+}
+
+static float svg_join_angle_deg(const svg_segment *prev, const svg_segment *next) {
+    if (!prev || !next) {
+        return 0.0f;
+    }
+    float dx0 = prev->x1 - prev->x0;
+    float dy0 = prev->y1 - prev->y0;
+    float dx1 = next->x1 - next->x0;
+    float dy1 = next->y1 - next->y0;
+    float l0 = sqrtf(dx0 * dx0 + dy0 * dy0);
+    float l1 = sqrtf(dx1 * dx1 + dy1 * dy1);
+    if (l1 <= 1e-6f) {
+        return svg_segment_angle_deg(prev);
+    }
+    if (l0 <= 1e-6f) {
+        return svg_segment_angle_deg(next);
+    }
+    dx0 /= l0;
+    dy0 /= l0;
+    dx1 /= l1;
+    dy1 /= l1;
+    float bx = dx0 + dx1;
+    float by = dy0 + dy1;
+    float bl = sqrtf(bx * bx + by * by);
+    if (bl <= 1e-6f) {
+        return svg_segment_angle_deg(next);
+    }
+    return atan2f(by, bx) * (180.0f / (float)M_PI);
+}
+
+static void svg_draw_marker_instance(svg_render_ctx *ctx, const svg_marker *mk, const svg_matrix *m,
+                                     float px, float py, float angle_deg, float stroke_width, float dpi) {
+    if (!ctx || !mk || !m || !mk->content || !*mk->content) {
+        return;
+    }
+    float mw = mk->marker_w > 0.0f ? mk->marker_w : 3.0f;
+    float mh = mk->marker_h > 0.0f ? mk->marker_h : 3.0f;
+    float vbw = mk->vb_ok && mk->vb_w > 0.0f ? mk->vb_w : mw;
+    float vbh = mk->vb_ok && mk->vb_h > 0.0f ? mk->vb_h : mh;
+    if (vbw <= 0.0f || vbh <= 0.0f) {
+        return;
+    }
+    float sx = mw / vbw;
+    float sy = mh / vbh;
+    float ax = 0.0f;
+    float ay = 0.0f;
+    if (!mk->preserve_none) {
+        float uni = fminf(sx, sy);
+        ax = (mw - vbw * uni) * mk->align_x;
+        ay = (mh - vbh * uni) * mk->align_y;
+        sx = uni;
+        sy = uni;
+    }
+    if (mk->units_stroke_width) {
+        float sw = stroke_width > 0.0f ? stroke_width : 1.0f;
+        sx *= sw;
+        sy *= sw;
+    }
+    float orient = mk->orient_auto ? angle_deg : mk->orient_angle;
+
+    svg_matrix gm = *m;
+    svg_matrix t;
+    svg_matrix_identity(&t);
+    t.e = px;
+    t.f = py;
+    svg_matrix_multiply(&gm, &t, &gm);
+    svg_matrix r;
+    svg_matrix_identity(&r);
+    svg_matrix_rotate(&r, orient);
+    svg_matrix_multiply(&gm, &r, &gm);
+    svg_matrix s;
+    svg_matrix_identity(&s);
+    s.a = sx;
+    s.d = sy;
+    svg_matrix_multiply(&gm, &s, &gm);
+    if (ax != 0.0f || ay != 0.0f) {
+        svg_matrix ta;
+        svg_matrix_identity(&ta);
+        ta.e = ax;
+        ta.f = ay;
+        svg_matrix_multiply(&gm, &ta, &gm);
+    }
+    if (mk->vb_ok) {
+        svg_matrix tvb;
+        svg_matrix_identity(&tvb);
+        tvb.e = -mk->vb_x;
+        tvb.f = -mk->vb_y;
+        svg_matrix_multiply(&gm, &tvb, &gm);
+    }
+    svg_matrix tref;
+    svg_matrix_identity(&tref);
+    tref.e = -mk->ref_x;
+    tref.f = -mk->ref_y;
+    svg_matrix_multiply(&gm, &tref, &gm);
+    svg_render_transformed_snippet(ctx, mk->content, &gm, dpi);
+}
+
+static void svg_draw_markers_for_segments(svg_render_ctx *ctx, const svg_style *style, const svg_matrix *m,
+                                          const svg_segments *segs, float dpi) {
+    if (!ctx || !style || !m || !segs || segs->stroke_count == 0) {
+        return;
+    }
+    if (style->stroke_type == SVG_PAINT_NONE || style->stroke_width <= 0.0f) {
+        return;
+    }
+    if (!style->marker_start && !style->marker_mid && !style->marker_end) {
+        return;
+    }
+    const svg_segment *first = &segs->stroke[0];
+    const svg_segment *last_seg = &segs->stroke[segs->stroke_count - 1];
+    int is_closed = fabsf(first->x0 - last_seg->x1) < 1e-4f &&
+                    fabsf(first->y0 - last_seg->y1) < 1e-4f;
+    if (style->marker_start) {
+        float a = is_closed && segs->stroke_count > 1
+            ? svg_join_angle_deg(last_seg, first)
+            : svg_segment_angle_deg(first);
+        if (style->marker_start->orient_auto && style->marker_start->orient_auto_start_reverse) {
+            a += 180.0f;
+        }
+        svg_draw_marker_instance(ctx, style->marker_start, m,
+                                 first->x0, first->y0,
+                                 a, style->stroke_width, dpi);
+    }
+    if (style->marker_mid && segs->stroke_count > 1) {
+        for (size_t i = 1; i < segs->stroke_count; i++) {
+            float a = svg_join_angle_deg(&segs->stroke[i - 1], &segs->stroke[i]);
+            svg_draw_marker_instance(ctx, style->marker_mid, m,
+                                     segs->stroke[i].x0, segs->stroke[i].y0,
+                                     a, style->stroke_width, dpi);
+        }
+    }
+    if (style->marker_end) {
+        float a = is_closed && segs->stroke_count > 1
+            ? svg_join_angle_deg(last_seg, first)
+            : svg_segment_angle_deg(last_seg);
+        svg_draw_marker_instance(ctx, style->marker_end, m,
+                                 last_seg->x1, last_seg->y1,
+                                 a, style->stroke_width, dpi);
+    }
+}
+
 static int svg_draw_shape(svg_render_ctx *ctx, const svg_style *style, const svg_matrix *m,
-                          const svg_tag *tag, const char *local, float dpi, svg_bbox *out_bbox) {
+                          const svg_tag *tag, const char *local, float dpi, const svg_defs *defs,
+                          svg_bbox *out_bbox) {
     if (!ctx || !style || !m || !tag || !local) {
         return 0;
     }
@@ -8959,6 +10314,14 @@ static int svg_draw_shape(svg_render_ctx *ctx, const svg_style *style, const svg
             }
         }
         svg_draw_samples_line(ctx, style, m, x1, y1, x2, y2);
+        if (style->marker_start || style->marker_mid || style->marker_end) {
+            svg_segments marker_segs;
+            svg_segments_init(&marker_segs);
+            if (svg_segments_add(&marker_segs, x1, y1, x2, y2, 1, 0)) {
+                svg_draw_markers_for_segments(ctx, style, m, &marker_segs, dpi);
+            }
+            svg_segments_free(&marker_segs);
+        }
         return 1;
     }
     if (strcmp(local, "polyline") == 0 || strcmp(local, "polygon") == 0) {
@@ -8996,6 +10359,7 @@ static int svg_draw_shape(svg_render_ctx *ctx, const svg_style *style, const svg
                 }
             }
             svg_draw_samples_segments(ctx, style, m, &segs);
+            svg_draw_markers_for_segments(ctx, style, m, &segs, dpi);
             svg_segments_free(&segs);
         }
         free(pts);
@@ -9013,9 +10377,153 @@ static int svg_draw_shape(svg_render_ctx *ctx, const svg_style *style, const svg
                 }
             }
             svg_draw_samples_segments(ctx, style, m, &segs);
+            svg_draw_markers_for_segments(ctx, style, m, &segs, dpi);
         }
         svg_segments_free(&segs);
         return 1;
+    }
+    if (strcmp(local, "use") == 0) {
+        const char *href = svg_get_attr(tag, "href");
+        if (!href) {
+            href = svg_get_attr(tag, "xlink:href");
+        }
+        char idbuf[96];
+        if (!svg_parse_href_id(href, idbuf, sizeof(idbuf))) {
+            return 0;
+        }
+        int ok = 0;
+        float x = svg_parse_length(svg_get_attr(tag, "x"), ctx->vb_w, dpi, &ok);
+        if (!ok) {
+            x = 0.0f;
+        }
+        float y = svg_parse_length(svg_get_attr(tag, "y"), ctx->vb_h, dpi, &ok);
+        if (!ok) {
+            y = 0.0f;
+        }
+        svg_matrix use_m = *m;
+        if (x != 0.0f || y != 0.0f) {
+            svg_matrix t;
+            svg_matrix_identity(&t);
+            t.e = x;
+            t.f = y;
+            svg_matrix tm;
+            svg_matrix_multiply(&use_m, &t, &tm);
+            use_m = tm;
+        }
+        const svg_symbol *sym = defs ? svg_defs_find_symbol(defs, idbuf) : NULL;
+        if (sym && sym->content && *sym->content) {
+            int w_ok = 0;
+            int h_ok = 0;
+            float sw = svg_parse_length(svg_get_attr(tag, "width"), ctx->vb_w, dpi, &w_ok);
+            float sh = svg_parse_length(svg_get_attr(tag, "height"), ctx->vb_h, dpi, &h_ok);
+            float sx = 1.0f;
+            float sy = 1.0f;
+            float ax = 0.0f;
+            float ay = 0.0f;
+            if (sym->vb_ok && sym->vb_w > 0.0f && sym->vb_h > 0.0f) {
+                if (w_ok && !h_ok) {
+                    sh = sw * (sym->vb_h / sym->vb_w);
+                    h_ok = 1;
+                } else if (!w_ok && h_ok) {
+                    sw = sh * (sym->vb_w / sym->vb_h);
+                    w_ok = 1;
+                }
+                if (w_ok && h_ok && sw > 0.0f && sh > 0.0f) {
+                    sx = sw / sym->vb_w;
+                    sy = sh / sym->vb_h;
+                    if (!sym->preserve_none) {
+                        float uni = fminf(sx, sy);
+                        ax = (sw - sym->vb_w * uni) * sym->align_x;
+                        ay = (sh - sym->vb_h * uni) * sym->align_y;
+                        sx = uni;
+                        sy = uni;
+                    }
+                }
+                if (sx != 1.0f || sy != 1.0f) {
+                    svg_matrix s;
+                    svg_matrix_identity(&s);
+                    s.a = sx;
+                    s.d = sy;
+                    svg_matrix_multiply(&use_m, &s, &use_m);
+                }
+                if (ax != 0.0f || ay != 0.0f) {
+                    svg_matrix ta;
+                    svg_matrix_identity(&ta);
+                    ta.e = ax;
+                    ta.f = ay;
+                    svg_matrix_multiply(&use_m, &ta, &use_m);
+                }
+                svg_matrix tvb;
+                svg_matrix_identity(&tvb);
+                tvb.e = -sym->vb_x;
+                tvb.f = -sym->vb_y;
+                svg_matrix_multiply(&use_m, &tvb, &use_m);
+            }
+            char *use_attrs = svg_build_use_wrapper_attrs(tag);
+            char *wrapped = svg_wrap_with_group_attrs(sym->content, use_attrs);
+            free(use_attrs);
+            int rendered = wrapped ? svg_render_transformed_snippet(ctx, wrapped, &use_m, dpi) : 0;
+            free(wrapped);
+            if (rendered) {
+                return 1;
+            }
+        }
+        svg_use_def *ud = defs ? svg_defs_find_use((svg_defs *)defs, idbuf) : NULL;
+        if (ud && ud->tag_name && ud->attr_count > 0) {
+            svg_tag ref_tag;
+            memset(&ref_tag, 0, sizeof(ref_tag));
+            ref_tag.name = ud->tag_name;
+            ref_tag.attr_count = ud->attr_count;
+            for (int i = 0; i < ud->attr_count; i++) {
+                ref_tag.attrs[i].name = ud->attrs[i].name;
+                ref_tag.attrs[i].value = ud->attrs[i].value;
+            }
+            const char *ref_local = svg_local_name(ref_tag.name);
+            svg_style ref_style = *style;
+            float base_len = (ctx->vb_w + ctx->vb_h) * 0.5f;
+            svg_apply_presentation_attrs(&ref_style, &ref_tag, base_len, dpi, defs);
+            svg_apply_inline_style_attr(&ref_style, &ref_tag, base_len, dpi, defs);
+            /* Let explicit properties on <use> override referenced-element styling. */
+            svg_apply_presentation_attrs(&ref_style, tag, base_len, dpi, defs);
+            svg_apply_inline_style_attr(&ref_style, tag, base_len, dpi, defs);
+            if (ref_style.display_none) {
+                return 1;
+            }
+            if (ref_style.visibility_hidden) {
+                ref_style.fill_type = SVG_PAINT_NONE;
+                ref_style.stroke_type = SVG_PAINT_NONE;
+                ref_style.fill_gradient = NULL;
+                ref_style.stroke_gradient = NULL;
+                ref_style.fill_pattern = NULL;
+                ref_style.stroke_pattern = NULL;
+            }
+            svg_bbox tmp_bbox;
+            int drew = svg_draw_shape(ctx, &ref_style, &use_m, &ref_tag, ref_local, dpi, defs, &tmp_bbox);
+            if (drew && out_bbox && svg_bbox_valid(&tmp_bbox)) {
+                *out_bbox = tmp_bbox;
+            }
+            return drew;
+        }
+        const svg_path_def *pd = defs ? svg_defs_find_path(defs, idbuf) : NULL;
+        if (!pd || !pd->d) {
+            return 0;
+        }
+        svg_segments segs;
+        svg_segments_init(&segs);
+        if (svg_parse_path(pd->d, &segs)) {
+            if (out_bbox && segs.stroke_count > 0) {
+                svg_bbox_add_rect(out_bbox, segs.minx + x, segs.miny + y,
+                                  segs.maxx - segs.minx, segs.maxy - segs.miny);
+                if (style->stroke_type != SVG_PAINT_NONE && style->stroke_width > 0.0f) {
+                    svg_bbox_expand(out_bbox, style->stroke_width * 0.5f);
+                }
+            }
+            svg_draw_samples_segments(ctx, style, &use_m, &segs);
+            svg_segments_free(&segs);
+            return 1;
+        }
+        svg_segments_free(&segs);
+        return 0;
     }
     return 0;
 }
@@ -9141,6 +10649,8 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
     char *p = buf;
     svg_tag tag;
     svg_stack_item stack[SVG_MAX_DEPTH];
+    svg_sibling_frame sibling_frames[SVG_MAX_DEPTH];
+    memset(sibling_frames, 0, sizeof(sibling_frames));
     int depth = 0;
     int root_pushed = 0;
     int skip_depth = 0;
@@ -9154,6 +10664,11 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
                 continue;
             }
             if (depth > 1) {
+                int clear_level = depth;
+                if (clear_level >= SVG_MAX_DEPTH) {
+                    clear_level = SVG_MAX_DEPTH - 1;
+                }
+                sibling_frames[clear_level].count = 0;
                 depth--;
             }
             continue;
@@ -9166,12 +10681,10 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
             svg_style_init(&root_style);
             svg_apply_presentation_attrs(&root_style, &tag, base_len, dpi, &defs);
             svg_elem_info root_info;
-            root_info.tag = local;
-            root_info.id = svg_get_attr(&tag, "id");
-            root_info.class_attr = svg_get_attr(&tag, "class");
+            svg_elem_info_from_tag(&root_info, local, &tag);
             svg_elem_info tmp_stack[SVG_MAX_DEPTH];
             tmp_stack[0] = root_info;
-            svg_css_apply(&root_style, &css, &defs, tmp_stack, 1, base_len, dpi);
+            svg_css_apply(&root_style, &css, &defs, tmp_stack, 1, NULL, 0, base_len, dpi);
             svg_apply_inline_style_attr(&root_style, &tag, base_len, dpi, &defs);
             svg_matrix root_attr;
             svg_matrix_identity(&root_attr);
@@ -9210,7 +10723,8 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
         }
         if (strcmp(local, "defs") == 0 || strcmp(local, "clippath") == 0 || strcmp(local, "mask") == 0 ||
             strcmp(local, "lineargradient") == 0 || strcmp(local, "radialgradient") == 0 ||
-            strcmp(local, "pattern") == 0 || strcmp(local, "filter") == 0) {
+            strcmp(local, "pattern") == 0 || strcmp(local, "filter") == 0 ||
+            strcmp(local, "symbol") == 0 || strcmp(local, "marker") == 0) {
             if (!tag.is_self_closing) {
                 skip_depth = 1;
             }
@@ -9220,9 +10734,7 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
         svg_style style = stack[depth - 1].style;
         svg_apply_presentation_attrs(&style, &tag, base_len, dpi, &defs);
         svg_elem_info info;
-        info.tag = local;
-        info.id = svg_get_attr(&tag, "id");
-        info.class_attr = svg_get_attr(&tag, "class");
+        svg_elem_info_from_tag(&info, local, &tag);
         svg_elem_info tmp_stack[SVG_MAX_DEPTH];
         int tmp_depth = depth < SVG_MAX_DEPTH ? depth : SVG_MAX_DEPTH;
         for (int i = 0; i < tmp_depth; i++) {
@@ -9231,8 +10743,17 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
         if (tmp_depth < SVG_MAX_DEPTH) {
             tmp_stack[tmp_depth++] = info;
         }
-        svg_css_apply(&style, &css, &defs, tmp_stack, tmp_depth, base_len, dpi);
+        int sib_level = depth;
+        if (sib_level >= SVG_MAX_DEPTH) {
+            sib_level = SVG_MAX_DEPTH - 1;
+        }
+        svg_sibling_frame *sib_frame = &sibling_frames[sib_level];
+        svg_css_apply(&style, &css, &defs, tmp_stack, tmp_depth,
+                      sib_frame->items, sib_frame->count, base_len, dpi);
         svg_apply_inline_style_attr(&style, &tag, base_len, dpi, &defs);
+        if (!svg_sibling_frame_push(sib_frame, &info)) {
+            continue;
+        }
 
         svg_matrix m = stack[depth - 1].transform;
         const char *transform_attr = svg_get_attr(&tag, "transform");
@@ -9245,6 +10766,13 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
             }
         }
 
+        if (style.display_none) {
+            if (!tag.is_self_closing) {
+                skip_depth = 1;
+            }
+            continue;
+        }
+
         if (strcmp(local, "g") == 0 || strcmp(local, "svg") == 0) {
             if (!tag.is_self_closing && depth < SVG_MAX_DEPTH) {
                 stack[depth].style = style;
@@ -9255,7 +10783,7 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
             continue;
         }
 
-        if (style.filter) {
+        if (style.filter && !style.visibility_hidden) {
             svg_render_ctx tmp_ctx = *ctx;
             size_t hi_w = (size_t)ctx->width * (size_t)ctx->ss;
             size_t hi_h = (size_t)ctx->height * (size_t)ctx->ss;
@@ -9345,7 +10873,7 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
                 }
                 drew = 1;
             } else {
-                drew = svg_draw_shape(&tmp_ctx, &style, &m, &tag, local, dpi, &bbox);
+                drew = svg_draw_shape(&tmp_ctx, &style, &m, &tag, local, dpi, &defs, &bbox);
                 if (drew) {
                     if (need_fill) {
                         svg_render_ctx fill_ctx = *ctx;
@@ -9356,7 +10884,7 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
                             fill_style.stroke_gradient = NULL;
                             fill_style.stroke_pattern = NULL;
                             fill_style.stroke_width = 0.0f;
-                            svg_draw_shape(&fill_ctx, &fill_style, &m, &tag, local, dpi, NULL);
+                            svg_draw_shape(&fill_ctx, &fill_style, &m, &tag, local, dpi, &defs, NULL);
                             fill_buf = fill_ctx.hi_rgba;
                         }
                     }
@@ -9368,7 +10896,7 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
                             stroke_style.fill_type = SVG_PAINT_NONE;
                             stroke_style.fill_gradient = NULL;
                             stroke_style.fill_pattern = NULL;
-                            svg_draw_shape(&stroke_ctx, &stroke_style, &m, &tag, local, dpi, NULL);
+                            svg_draw_shape(&stroke_ctx, &stroke_style, &m, &tag, local, dpi, &defs, NULL);
                             stroke_buf = stroke_ctx.hi_rgba;
                         }
                     }
@@ -9399,18 +10927,37 @@ static int svg_render(svg_render_ctx *ctx, const unsigned char *data, size_t siz
                 text_stack[text_depth++] = info;
             }
             if (!tag.is_self_closing) {
-                svg_render_text_element(ctx, &style, &m, &tag, &p, &defs, &css,
+                svg_style text_style = style;
+                if (text_style.visibility_hidden) {
+                    text_style.fill_type = SVG_PAINT_NONE;
+                    text_style.stroke_type = SVG_PAINT_NONE;
+                    text_style.fill_gradient = NULL;
+                    text_style.stroke_gradient = NULL;
+                    text_style.fill_pattern = NULL;
+                    text_style.stroke_pattern = NULL;
+                }
+                svg_render_text_element(ctx, &text_style, &m, &tag, &p, &defs, &css,
                                         text_stack, text_depth, base_len, dpi, NULL);
             }
             continue;
         }
 
-        if (svg_draw_shape(ctx, &style, &m, &tag, local, dpi, NULL)) {
+        svg_style draw_style = style;
+        if (draw_style.visibility_hidden) {
+            draw_style.fill_type = SVG_PAINT_NONE;
+            draw_style.stroke_type = SVG_PAINT_NONE;
+            draw_style.fill_gradient = NULL;
+            draw_style.stroke_gradient = NULL;
+            draw_style.fill_pattern = NULL;
+            draw_style.stroke_pattern = NULL;
+        }
+        if (svg_draw_shape(ctx, &draw_style, &m, &tag, local, dpi, &defs, NULL)) {
             continue;
         }
     }
 
     free(buf);
+    svg_sibling_frames_free(sibling_frames, SVG_MAX_DEPTH);
     svg_defs_free(&defs);
     svg_css_free(&css);
     return 1;

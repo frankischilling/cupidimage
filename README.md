@@ -6,7 +6,7 @@ Terminal graphics output currently supports:
 - No SIXEL support yet
 
 Supported formats (decoder status):
-- SVG: static subset with shapes (rect/circle/ellipse/line/polyline/polygon/path including arc commands), basic text (`<text>/<tspan>/<textPath>` via built-in bitmap font), presentation + inline styles + basic `<style>` selectors, transforms, viewBox/preserveAspectRatio, linear/radial gradients, patterns, stroke caps/joins/dash, clipPath, luminance masks, and filter primitives: `feGaussianBlur`, `feOffset`, `feColorMatrix`, `feComponentTransfer`, `feMorphology`, `feConvolveMatrix`, `feTurbulence`, `feDisplacementMap`, `feDiffuseLighting`, `feSpecularLighting`, `feTile`, `feImage`, `feFlood`, `feBlend`, `feComposite`, `feMerge` (including Source/Background/FillPaint/StrokePaint filter inputs and primitive subregions). Supersampled rasterization for terminal preview. No SVG animation/scripting/DOM, no external web/data URI fetches, no custom font loading.
+- SVG: static subset with shapes (rect/circle/ellipse/line/polyline/polygon/path including arc commands), basic text (`<text>/<tspan>/<textPath>` via built-in bitmap font; includes `dominant-baseline`/`alignment-baseline` handling and UTF-8 bullet `•` fallback glyph), presentation + inline styles + basic `<style>` selectors (descendant, child `>`, adjacent `+`, and general sibling `~` combinators, plus basic `[attr]`/`[attr=value]` matching and `display`/`visibility`), transforms, viewBox/preserveAspectRatio, linear/radial gradients, patterns, `hsl()/hsla()` colors, stroke caps/joins/dash, clipPath, luminance and alpha masks (`mask-type`), basic `<use>` references for primitive shapes and `<symbol>` (with symbol `preserveAspectRatio` handling and wrapper style attributes), basic SVG markers (`marker-start`/`marker-mid`/`marker-end`, including `orient=\"auto-start-reverse\"` and improved join-angle placement), and filter primitives: `feGaussianBlur`, `feOffset`, `feColorMatrix`, `feComponentTransfer`, `feMorphology`, `feConvolveMatrix`, `feTurbulence`, `feDisplacementMap`, `feDiffuseLighting`, `feSpecularLighting`, `feTile`, `feImage`, `feFlood`, `feBlend`, `feComposite`, `feMerge` (including Source/Background/FillPaint/StrokePaint filter inputs and primitive subregions). Supersampled rasterization for terminal preview. No SVG animation/scripting/DOM, no external web/data URI fetches, no custom font loading.
 - PNG: non-interlaced and Adam7; color types 0/2/3/4/6 with 1/2/4/8/16-bit depths; palette + tRNS.
 - JPEG: baseline/progressive DCT, Huffman-coded, 8-bit precision; grayscale/YCbCr/CMYK/YCCK; sampling up to 2x2. No arithmetic coding or >2x2 sampling.
 - WebP: VP8 lossy keyframes; VP8X still images; VP8L lossless with transforms/color cache; ALPH chunk method 0. No animation or interframes.
@@ -175,10 +175,16 @@ scripts/make_test_svgs.sh
 scripts/test_svg_assets.sh
 ```
 
+Non-interactive SVG regression checks:
+```sh
+scripts/test_svg_regressions.sh
+make test-svg-regressions
+```
+
 
 Todo
 - [ ] For each image format provide option for checkerboard or white for alpha
 - [ ] SVG: wider text/font support
-- [ ] SVG: markers, use/symbol, and more filter primitives
+- [ ] SVG: advanced marker behavior and full `<use>/<symbol>` semantics, plus more filter primitives
 - [ ] PDF
 - [ ] HEIC / HEIF
