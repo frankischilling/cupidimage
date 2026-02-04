@@ -1,0 +1,89 @@
+<svg fill="none" viewBox="0 0 1600 400" width="1600" height="400" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+
+    <style><![CDATA[
+
+      .title { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif; font-size: 72px; letter-spacing: 1px; fill: #e5e7eb; font-weight: 500; }
+
+      .subtitle { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', sans-serif; font-size: 28px; fill: #9ca3af; font-weight: 500; }
+
+      .chip { font-family: system-ui, sans-serif; font-size: 22px; fill: #111827; font-weight: 500; }
+
+    ]]></style>
+
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+
+      <stop offset="0%" stop-color="#0f172a"/>
+
+      <stop offset="100%" stop-color="#111827"/>
+
+    </linearGradient>
+
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%">
+
+      <feGaussianBlur stdDeviation="30"/>
+
+    </filter>
+
+  </defs>
+
+  <!-- Background -->
+
+  <rect width="1600" height="400" fill="url(#bg)" rx="24"/>
+
+  <!-- Glow blobs -->
+
+  <g filter="url(#soft)" opacity="0.35">
+
+    <circle cx="250" cy="120" r="140" fill="#22d3ee"/>
+
+    <circle cx="1350" cy="300" r="160" fill="#a78bfa"/>
+
+  </g>
+
+  <!-- Text -->
+
+  <text x="800" y="170" text-anchor="middle" class="title">FRANKISCHILLING</text>
+
+  <text x="800" y="220" text-anchor="middle" class="subtitle">IT @ Wentworth • GNU/Linux • Emulators • PHP/Python/C/C++</text>
+
+<!-- Chips -->
+
+<g transform="translate(305,270)">
+
+  <g transform="translate(0,0)">
+
+    <rect x="0" y="-24" rx="14" width="230" height="48" fill="#67e8f9"/>
+
+    <text x="115" y="0" text-anchor="middle" dominant-baseline="middle" class="chip">Arch Linux</text>
+
+  </g>
+
+  <g transform="translate(250,0)">
+
+    <rect x="0" y="-24" rx="14" width="200" height="48" fill="#c4b5fd"/>
+
+    <text x="100" y="0" text-anchor="middle" dominant-baseline="middle" class="chip">Lua + XUI</text>
+
+  </g>
+
+  <g transform="translate(470,0)">
+
+    <rect x="0" y="-24" rx="14" width="260" height="48" fill="#86efac"/>
+
+    <text x="130" y="0" text-anchor="middle" dominant-baseline="middle" class="chip">C/C++ (VS2008/XDK)</text>
+
+  </g>
+
+  <g transform="translate(750,0)">
+
+    <rect x="0" y="-24" rx="14" width="240" height="48" fill="#fca5a5"/>
+
+    <text x="120" y="0" text-anchor="middle" dominant-baseline="middle" class="chip">PHP 8.3 + MySQL</text>
+
+  </g>
+
+</g>
+
+</svg>

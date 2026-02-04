@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <path id="curve" d="M20 150 C80 110 140 190 300 150"/>
+  </defs>
+  <text x="12" y="30" font-size="18" fill="#1d3557">
+    Hello <tspan fill="#e63946">SVG</tspan>
+  </text>
+  <text x="12" y="60" font-size="12" letter-spacing="2" word-spacing="4" fill="#457b9d">
+    Spaced text test
+  </text>
+  <text x="12" y="90" font-size="14" fill="#2a9d8f">
+    <tspan x="12" dy="0">Line one</tspan>
+    <tspan x="12" dy="16" fill="#e76f51">Line two</tspan>
+  </text>
+  <text font-size="14" fill="#264653">
+    <textPath href="#curve" startOffset="0%">Text on a path</textPath>
+  </text>
+</svg>

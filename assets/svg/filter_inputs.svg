@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#219ebc"/>
+      <stop offset="100%" stop-color="#023047"/>
+    </linearGradient>
+    <filter id="paintmix" x="-10%" y="-10%" width="120%" height="120%">
+      <feComposite in="FillPaint" in2="SourceGraphic" operator="in" result="filled"/>
+      <feComposite in="StrokePaint" in2="SourceGraphic" operator="in" result="stroked"/>
+      <feBlend in="filled" in2="stroked" mode="multiply" result="mix"/>
+      <feComposite in="mix" in2="BackgroundImage" operator="over" result="out"/>
+      <feComposite in="out" in2="BackgroundAlpha" operator="atop"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="320" height="200" fill="url(#bg)"/>
+  <rect x="40" y="40" width="240" height="120" rx="16" ry="16"
+        fill="#ffb703" stroke="#fb8500" stroke-width="10" filter="url(#paintmix)"/>
+</svg>
