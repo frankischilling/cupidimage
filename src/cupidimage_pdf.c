@@ -33,6 +33,26 @@ typedef struct {
     unsigned char *owned;
 } pdf_object_view;
 
+typedef struct {
+    uint32_t src_code;
+    uint32_t dst_codepoint;
+    uint8_t src_len;
+} pdf_tounicode_entry;
+
+typedef struct {
+    char name[32];
+    pdf_tounicode_entry *entries;
+    int count;
+    int cap;
+    int max_src_len;
+} pdf_font_map;
+
+typedef struct {
+    pdf_font_map *fonts;
+    int count;
+    int cap;
+} pdf_font_table;
+
 static int pdf_inflate_auto(const unsigned char *data, size_t size,
                             unsigned char **out_data, size_t *out_len);
 static int extract_dict_int(const unsigned char *data, size_t start, size_t end,
@@ -167,7 +187,7 @@ static int parse_trailer(const unsigned char *data, size_t size, size_t xref_pos
     size_t search_limit = xref_pos + 10000;
     if (search_limit > size) search_limit = size;
 
-    while (pos < search_limit) {
+    while (pos + 7 <= search_limit) {
         if (memcmp(&data[pos], "trailer", 7) == 0) {
             trailer_pos = pos;
             break;
@@ -194,10 +214,10 @@ static int parse_trailer(const unsigned char *data, size_t size, size_t xref_pos
     }
 
     xref->root_obj = 1;
-    while (pos < size - 1) {
+    while (pos + 1 < size) {
         if (data[pos] == '>' && data[pos + 1] == '>') break;
 
-        if (memcmp(&data[pos], "/Root", 5) == 0) {
+        if (pos + 5 <= size && memcmp(&data[pos], "/Root", 5) == 0) {
             pos += 5;
             while (pos < size && (data[pos] == ' ' || data[pos] == '\n' || data[pos] == '\r')) pos++;
             int obj_num = 0;
@@ -1461,6 +1481,541 @@ static int pdf_inflate_auto(const unsigned char *data, size_t size,
     return 0;
 }
 
+static void pdf_font_table_init(pdf_font_table *table) {
+    if (!table) return;
+    table->fonts = NULL;
+    table->count = 0;
+    table->cap = 0;
+}
+
+static void pdf_font_table_free(pdf_font_table *table) {
+    if (!table) return;
+    for (int i = 0; i < table->count; i++) {
+        free(table->fonts[i].entries);
+        table->fonts[i].entries = NULL;
+        table->fonts[i].count = 0;
+        table->fonts[i].cap = 0;
+        table->fonts[i].max_src_len = 1;
+    }
+    free(table->fonts);
+    table->fonts = NULL;
+    table->count = 0;
+    table->cap = 0;
+}
+
+static pdf_font_map *pdf_font_table_add(pdf_font_table *table, const char *name) {
+    if (!table || !name || !*name) {
+        return NULL;
+    }
+    for (int i = 0; i < table->count; i++) {
+        if (strcmp(table->fonts[i].name, name) == 0) {
+            return &table->fonts[i];
+        }
+    }
+
+    if (table->count >= table->cap) {
+        int new_cap = (table->cap > 0) ? table->cap * 2 : 8;
+        pdf_font_map *new_fonts = (pdf_font_map *)realloc(table->fonts, (size_t)new_cap * sizeof(pdf_font_map));
+        if (!new_fonts) {
+            return NULL;
+        }
+        table->fonts = new_fonts;
+        table->cap = new_cap;
+    }
+
+    pdf_font_map *font = &table->fonts[table->count++];
+    memset(font, 0, sizeof(*font));
+    snprintf(font->name, sizeof(font->name), "%s", name);
+    font->max_src_len = 1;
+    return font;
+}
+
+static const pdf_font_map *pdf_font_table_find(const pdf_font_table *table, const char *name) {
+    if (!table || !name || !*name) {
+        return NULL;
+    }
+    for (int i = 0; i < table->count; i++) {
+        if (strcmp(table->fonts[i].name, name) == 0) {
+            return &table->fonts[i];
+        }
+    }
+    return NULL;
+}
+
+static int pdf_font_add_tounicode(pdf_font_map *font, uint32_t src_code, uint8_t src_len,
+                                  uint32_t dst_codepoint) {
+    if (!font || src_len == 0) {
+        return 0;
+    }
+    for (int i = 0; i < font->count; i++) {
+        if (font->entries[i].src_code == src_code && font->entries[i].src_len == src_len) {
+            font->entries[i].dst_codepoint = dst_codepoint;
+            return 1;
+        }
+    }
+    if (font->count >= font->cap) {
+        int new_cap = (font->cap > 0) ? font->cap * 2 : 256;
+        pdf_tounicode_entry *new_entries = (pdf_tounicode_entry *)realloc(
+            font->entries, (size_t)new_cap * sizeof(pdf_tounicode_entry));
+        if (!new_entries) {
+            return 0;
+        }
+        font->entries = new_entries;
+        font->cap = new_cap;
+    }
+    font->entries[font->count].src_code = src_code;
+    font->entries[font->count].src_len = src_len;
+    font->entries[font->count].dst_codepoint = dst_codepoint;
+    font->count++;
+    if ((int)src_len > font->max_src_len) {
+        font->max_src_len = (int)src_len;
+    }
+    return 1;
+}
+
+typedef enum {
+    PDF_CMAP_TOK_EOF = 0,
+    PDF_CMAP_TOK_WORD = 1,
+    PDF_CMAP_TOK_HEX = 2,
+    PDF_CMAP_TOK_LBRACK = 3,
+    PDF_CMAP_TOK_RBRACK = 4
+} pdf_cmap_tok_type;
+
+static pdf_cmap_tok_type pdf_cmap_next_token(const unsigned char *data, size_t len, size_t *pos,
+                                             char *tok, size_t tok_cap) {
+    if (!data || !pos || !tok || tok_cap == 0) {
+        return PDF_CMAP_TOK_EOF;
+    }
+    while (*pos < len) {
+        unsigned char c = data[*pos];
+        if (c == '%') {
+            while (*pos < len && data[*pos] != '\n' && data[*pos] != '\r') {
+                (*pos)++;
+            }
+            continue;
+        }
+        if (isspace(c)) {
+            (*pos)++;
+            continue;
+        }
+        break;
+    }
+    if (*pos >= len) {
+        return PDF_CMAP_TOK_EOF;
+    }
+
+    unsigned char c = data[*pos];
+    if (c == '[') {
+        (*pos)++;
+        tok[0] = '[';
+        tok[1] = '\0';
+        return PDF_CMAP_TOK_LBRACK;
+    }
+    if (c == ']') {
+        (*pos)++;
+        tok[0] = ']';
+        tok[1] = '\0';
+        return PDF_CMAP_TOK_RBRACK;
+    }
+    if (c == '<') {
+        (*pos)++;
+        size_t n = 0;
+        while (*pos < len && data[*pos] != '>') {
+            if (n + 1 < tok_cap) {
+                tok[n++] = (char)data[*pos];
+            }
+            (*pos)++;
+        }
+        if (*pos < len && data[*pos] == '>') {
+            (*pos)++;
+        }
+        tok[n] = '\0';
+        return PDF_CMAP_TOK_HEX;
+    }
+
+    size_t n = 0;
+    while (*pos < len) {
+        c = data[*pos];
+        if (isspace(c) || c == '[' || c == ']' || c == '<' || c == '>' || c == '%') {
+            break;
+        }
+        if (n + 1 < tok_cap) {
+            tok[n++] = (char)c;
+        }
+        (*pos)++;
+    }
+    tok[n] = '\0';
+    return (n > 0) ? PDF_CMAP_TOK_WORD : PDF_CMAP_TOK_EOF;
+}
+
+static int pdf_hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static int pdf_cmap_hex_to_code(const char *hex, uint32_t *code, uint8_t *code_len, uint32_t *first_u16) {
+    if (!hex || !*hex || !code || !code_len || !first_u16) {
+        return 0;
+    }
+    size_t nhex = strlen(hex);
+    if ((nhex & 1u) != 0u) {
+        return 0;
+    }
+    size_t nbytes = nhex / 2u;
+    if (nbytes == 0 || nbytes > 4u) {
+        return 0;
+    }
+
+    uint8_t bytes[4] = {0, 0, 0, 0};
+    for (size_t i = 0; i < nbytes; i++) {
+        int hi = pdf_hex_value(hex[i * 2u]);
+        int lo = pdf_hex_value(hex[i * 2u + 1u]);
+        if (hi < 0 || lo < 0) {
+            return 0;
+        }
+        bytes[i] = (uint8_t)((hi << 4) | lo);
+    }
+
+    uint32_t v = 0;
+    for (size_t i = 0; i < nbytes; i++) {
+        v = (v << 8u) | bytes[i];
+    }
+    *code = v;
+    *code_len = (uint8_t)nbytes;
+
+    uint32_t u = 0;
+    if (nbytes >= 2u) {
+        u = ((uint32_t)bytes[0] << 8u) | bytes[1];
+    } else {
+        u = (uint32_t)bytes[0];
+    }
+    *first_u16 = u;
+    return 1;
+}
+
+static int pdf_parse_tounicode_stream(const unsigned char *stream, size_t stream_len, pdf_font_map *font) {
+    if (!stream || !font) {
+        return 0;
+    }
+
+    size_t pos = 0;
+    char tok[256];
+    while (1) {
+        pdf_cmap_tok_type t = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+        if (t == PDF_CMAP_TOK_EOF) {
+            break;
+        }
+
+        if (t == PDF_CMAP_TOK_WORD && strcmp(tok, "beginbfchar") == 0) {
+            while (1) {
+                pdf_cmap_tok_type a = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                if (a == PDF_CMAP_TOK_EOF) {
+                    return 1;
+                }
+                if (a == PDF_CMAP_TOK_WORD && strcmp(tok, "endbfchar") == 0) {
+                    break;
+                }
+                if (a != PDF_CMAP_TOK_HEX) {
+                    continue;
+                }
+                char src_hex[256];
+                snprintf(src_hex, sizeof(src_hex), "%s", tok);
+
+                pdf_cmap_tok_type b = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                if (b != PDF_CMAP_TOK_HEX) {
+                    continue;
+                }
+
+                uint32_t src_code = 0;
+                uint8_t src_len = 0;
+                uint8_t dst_len = 0;
+                uint32_t dst = 0;
+                uint32_t dummy = 0;
+                if (pdf_cmap_hex_to_code(src_hex, &src_code, &src_len, &dummy) &&
+                    pdf_cmap_hex_to_code(tok, &dummy, &dst_len, &dst)) {
+                    (void)pdf_font_add_tounicode(font, src_code, src_len, dst);
+                }
+            }
+            continue;
+        }
+
+        if (t == PDF_CMAP_TOK_WORD && strcmp(tok, "beginbfrange") == 0) {
+            while (1) {
+                pdf_cmap_tok_type a = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                if (a == PDF_CMAP_TOK_EOF) {
+                    return 1;
+                }
+                if (a == PDF_CMAP_TOK_WORD && strcmp(tok, "endbfrange") == 0) {
+                    break;
+                }
+                if (a != PDF_CMAP_TOK_HEX) {
+                    continue;
+                }
+                char start_hex[256];
+                snprintf(start_hex, sizeof(start_hex), "%s", tok);
+
+                pdf_cmap_tok_type b = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                if (b != PDF_CMAP_TOK_HEX) {
+                    continue;
+                }
+                char end_hex[256];
+                snprintf(end_hex, sizeof(end_hex), "%s", tok);
+
+                uint32_t start_code = 0, end_code = 0, dst_first = 0, dummy = 0;
+                uint8_t start_len = 0, end_len = 0, dst_len = 0;
+                if (!pdf_cmap_hex_to_code(start_hex, &start_code, &start_len, &dummy) ||
+                    !pdf_cmap_hex_to_code(end_hex, &end_code, &end_len, &dummy) ||
+                    start_len != end_len || end_code < start_code) {
+                    continue;
+                }
+
+                pdf_cmap_tok_type c = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                if (c == PDF_CMAP_TOK_HEX) {
+                    if (!pdf_cmap_hex_to_code(tok, &dummy, &dst_len, &dst_first)) {
+                        continue;
+                    }
+                    uint32_t count = end_code - start_code + 1u;
+                    for (uint32_t i = 0; i < count; i++) {
+                        (void)pdf_font_add_tounicode(font, start_code + i, start_len, dst_first + i);
+                    }
+                } else if (c == PDF_CMAP_TOK_LBRACK) {
+                    uint32_t current = start_code;
+                    while (current <= end_code) {
+                        pdf_cmap_tok_type d = pdf_cmap_next_token(stream, stream_len, &pos, tok, sizeof(tok));
+                        if (d == PDF_CMAP_TOK_EOF || d == PDF_CMAP_TOK_RBRACK) {
+                            break;
+                        }
+                        if (d != PDF_CMAP_TOK_HEX) {
+                            continue;
+                        }
+                        if (!pdf_cmap_hex_to_code(tok, &dummy, &dst_len, &dst_first)) {
+                            continue;
+                        }
+                        (void)pdf_font_add_tounicode(font, current, start_len, dst_first);
+                        current++;
+                    }
+                }
+            }
+            continue;
+        }
+    }
+
+    return 1;
+}
+
+static int pdf_parse_font_tounicode(const unsigned char *data, size_t size, int font_obj,
+                                    pdf_font_map *font, char *err, size_t errcap) {
+    pdf_object_view font_view = {0};
+    if (!get_object_content(data, size, font_obj, &font_view)) {
+        set_err(err, errcap, "pdf: font object not found");
+        return 0;
+    }
+
+    int tounicode_obj = 0;
+    if (!extract_dict_ref(font_view.data, 0, font_view.len, "/ToUnicode", &tounicode_obj)) {
+        pdf_object_view_release(&font_view);
+        return 1;
+    }
+    pdf_object_view_release(&font_view);
+
+    pdf_object_view cmap_obj = {0};
+    if (!get_object_content(data, size, tounicode_obj, &cmap_obj)) {
+        set_err(err, errcap, "pdf: ToUnicode object not found");
+        return 0;
+    }
+
+    size_t stream_kw_pos = 0;
+    const unsigned char *stream_ptr = NULL;
+    size_t stream_len = 0;
+    if (!extract_stream_from_object(cmap_obj.data, cmap_obj.len, &stream_ptr, &stream_len, &stream_kw_pos)) {
+        pdf_object_view_release(&cmap_obj);
+        return 1;
+    }
+
+    const unsigned char *decoded = stream_ptr;
+    size_t decoded_len = stream_len;
+    unsigned char *decoded_owned = NULL;
+    if (buffer_contains(cmap_obj.data, 0, stream_kw_pos, "/FlateDecode") ||
+        buffer_contains(cmap_obj.data, 0, stream_kw_pos, "/Fl")) {
+        if (!pdf_inflate_auto(stream_ptr, stream_len, &decoded_owned, &decoded_len)) {
+            pdf_object_view_release(&cmap_obj);
+            set_err(err, errcap, "pdf: failed to decode ToUnicode stream");
+            return 0;
+        }
+        decoded = decoded_owned;
+    }
+
+    int ok = pdf_parse_tounicode_stream(decoded, decoded_len, font);
+    free(decoded_owned);
+    pdf_object_view_release(&cmap_obj);
+    if (!ok) {
+        set_err(err, errcap, "pdf: failed to parse ToUnicode map");
+        return 0;
+    }
+    return 1;
+}
+
+static int pdf_find_inline_dict(const unsigned char *data, size_t start, size_t end,
+                                const char *key, size_t *dict_start, size_t *dict_end) {
+    size_t key_len = strlen(key);
+    if (!data || !key || !dict_start || !dict_end || key_len == 0 || end <= start) {
+        return 0;
+    }
+    for (size_t pos = start; pos + key_len < end; pos++) {
+        if (memcmp(&data[pos], key, key_len) != 0) {
+            continue;
+        }
+        size_t p = pos + key_len;
+        while (p < end && (data[p] == ' ' || data[p] == '\n' || data[p] == '\r' || data[p] == '\t')) p++;
+        if (p + 1 >= end || data[p] != '<' || data[p + 1] != '<') {
+            continue;
+        }
+        int depth = 1;
+        size_t q = p + 2;
+        while (q + 1 < end && depth > 0) {
+            if (data[q] == '<' && data[q + 1] == '<') {
+                depth++;
+                q += 2;
+                continue;
+            }
+            if (data[q] == '>' && data[q + 1] == '>') {
+                depth--;
+                q += 2;
+                continue;
+            }
+            q++;
+        }
+        if (depth == 0) {
+            *dict_start = p + 2;
+            *dict_end = q - 2;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int pdf_collect_fonts_from_dict(const unsigned char *data, size_t size,
+                                       const unsigned char *dict_data, size_t dict_start, size_t dict_end,
+                                       pdf_font_table *table, char *err, size_t errcap) {
+    size_t pos = dict_start;
+    while (pos < dict_end) {
+        if (dict_data[pos] != '/') {
+            pos++;
+            continue;
+        }
+        pos++;
+        char name[32];
+        size_t n = 0;
+        while (pos < dict_end &&
+               !isspace((unsigned char)dict_data[pos]) &&
+               dict_data[pos] != '/' && dict_data[pos] != '<' && dict_data[pos] != '>' &&
+               dict_data[pos] != '[' && dict_data[pos] != ']' && dict_data[pos] != '(' && dict_data[pos] != ')') {
+            if (n + 1 < sizeof(name)) {
+                name[n++] = (char)dict_data[pos];
+            }
+            pos++;
+        }
+        name[n] = '\0';
+        if (n == 0) {
+            continue;
+        }
+
+        while (pos < dict_end && (dict_data[pos] == ' ' || dict_data[pos] == '\n' ||
+                                  dict_data[pos] == '\r' || dict_data[pos] == '\t')) pos++;
+        if (pos >= dict_end || dict_data[pos] < '0' || dict_data[pos] > '9') {
+            continue;
+        }
+
+        int obj_num = 0;
+        while (pos < dict_end && dict_data[pos] >= '0' && dict_data[pos] <= '9') {
+            obj_num = obj_num * 10 + (dict_data[pos] - '0');
+            pos++;
+        }
+        while (pos < dict_end && (dict_data[pos] == ' ' || dict_data[pos] == '\n' ||
+                                  dict_data[pos] == '\r' || dict_data[pos] == '\t')) pos++;
+        if (pos >= dict_end || dict_data[pos] < '0' || dict_data[pos] > '9') {
+            continue;
+        }
+        while (pos < dict_end && dict_data[pos] >= '0' && dict_data[pos] <= '9') {
+            pos++;
+        }
+        while (pos < dict_end && (dict_data[pos] == ' ' || dict_data[pos] == '\n' ||
+                                  dict_data[pos] == '\r' || dict_data[pos] == '\t')) pos++;
+        if (pos >= dict_end || dict_data[pos] != 'R' || obj_num <= 0) {
+            continue;
+        }
+        pos++;
+
+        pdf_font_map *font = pdf_font_table_add(table, name);
+        if (!font) {
+            set_err(err, errcap, "pdf: out of memory");
+            return 0;
+        }
+        if (!pdf_parse_font_tounicode(data, size, obj_num, font, err, errcap)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int pdf_collect_page_fonts(const unsigned char *data, size_t size, int page_obj,
+                                  pdf_font_table *table, char *err, size_t errcap) {
+    if (!table) {
+        set_err(err, errcap, "pdf: null font table");
+        return 0;
+    }
+
+    pdf_object_view page = {0};
+    if (!get_object_content(data, size, page_obj, &page)) {
+        set_err(err, errcap, "pdf: page object not found");
+        return 0;
+    }
+
+    pdf_object_view resources = {0};
+    const unsigned char *res_data = page.data;
+    size_t res_len = page.len;
+    int resources_obj = 0;
+    if (extract_dict_ref(page.data, 0, page.len, "/Resources", &resources_obj) && resources_obj > 0) {
+        if (!get_object_content(data, size, resources_obj, &resources)) {
+            pdf_object_view_release(&page);
+            set_err(err, errcap, "pdf: resources object not found");
+            return 0;
+        }
+        res_data = resources.data;
+        res_len = resources.len;
+    }
+
+    int font_dict_obj = 0;
+    if (extract_dict_ref(res_data, 0, res_len, "/Font", &font_dict_obj) && font_dict_obj > 0) {
+        pdf_object_view font_dict = {0};
+        if (!get_object_content(data, size, font_dict_obj, &font_dict)) {
+            pdf_object_view_release(&resources);
+            pdf_object_view_release(&page);
+            set_err(err, errcap, "pdf: font dictionary object not found");
+            return 0;
+        }
+        int ok = pdf_collect_fonts_from_dict(data, size, font_dict.data, 0, font_dict.len, table, err, errcap);
+        pdf_object_view_release(&font_dict);
+        pdf_object_view_release(&resources);
+        pdf_object_view_release(&page);
+        return ok;
+    }
+
+    size_t dict_start = 0;
+    size_t dict_end = 0;
+    int found = pdf_find_inline_dict(res_data, 0, res_len, "/Font", &dict_start, &dict_end);
+    int ok = 1;
+    if (found) {
+        ok = pdf_collect_fonts_from_dict(data, size, res_data, dict_start, dict_end, table, err, errcap);
+    }
+
+    pdf_object_view_release(&resources);
+    pdf_object_view_release(&page);
+    return ok;
+}
+
 static const uint8_t pdf_font8x8_basic[128][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00},
     {0x7E,0x81,0xA5,0x81,0xBD,0x99,0x81,0x7E},
@@ -1635,6 +2190,8 @@ typedef struct {
     int gs_stack_len;
     pdf_path path;
     int in_text;
+    const pdf_font_table *font_table;
+    const pdf_font_map *current_font;
 } pdf_render_state;
 
 static int pdf_is_ws(unsigned char c) {
@@ -2402,29 +2959,93 @@ static float pdf_char_advance_em(unsigned char c) {
     return 0.5f;
 }
 
+static int pdf_font_lookup_codepoint(const pdf_font_map *font, uint32_t src_code, uint8_t src_len,
+                                     uint32_t *dst_codepoint) {
+    if (!font || !dst_codepoint || src_len == 0) {
+        return 0;
+    }
+    for (int i = 0; i < font->count; i++) {
+        if (font->entries[i].src_code == src_code && font->entries[i].src_len == src_len) {
+            *dst_codepoint = font->entries[i].dst_codepoint;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static uint32_t pdf_decode_next_codepoint(const pdf_render_state *st,
+                                          const unsigned char *bytes, size_t len, size_t *pos) {
+    if (!bytes || !pos || *pos >= len) {
+        return 0;
+    }
+
+    const pdf_font_map *font = st ? st->current_font : NULL;
+    if (font && font->count > 0) {
+        int max_len = font->max_src_len;
+        if (max_len > 4) max_len = 4;
+        for (int take = max_len; take >= 1; take--) {
+            if (*pos + (size_t)take > len) {
+                continue;
+            }
+            uint32_t src = 0;
+            for (int i = 0; i < take; i++) {
+                src = (src << 8u) | bytes[*pos + (size_t)i];
+            }
+            uint32_t dst = 0;
+            if (pdf_font_lookup_codepoint(font, src, (uint8_t)take, &dst)) {
+                *pos += (size_t)take;
+                return dst;
+            }
+        }
+    }
+
+    uint32_t raw = bytes[*pos];
+    (*pos)++;
+    return raw;
+}
+
+static unsigned char pdf_codepoint_to_ascii(uint32_t cp) {
+    if (cp < 128u) {
+        return (unsigned char)cp;
+    }
+    if (cp == 0x2018u || cp == 0x2019u || cp == 0x2032u) return '\'';
+    if (cp == 0x201Cu || cp == 0x201Du || cp == 0x2033u) return '"';
+    if (cp == 0x2013u || cp == 0x2014u || cp == 0x2212u) return '-';
+    if (cp == 0x00A0u) return ' ';
+    if (cp == 0x2022u) return '*';
+    return '?';
+}
+
 static void pdf_render_text_string(pdf_render_state *st, const char *s, size_t len) {
     if (!st || !s || !st->in_text) {
         return;
     }
 
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (c == '\r' || c == '\n') {
+    const unsigned char *bytes = (const unsigned char *)s;
+    size_t pos = 0;
+    while (pos < len) {
+        uint32_t cp = pdf_decode_next_codepoint(st, bytes, len, &pos);
+        if (cp == '\r' || cp == '\n') {
             float lead = (st->leading_pts > 0.0f) ? st->leading_pts : st->font_size_pts * 1.2f;
             st->line_y_pts -= lead;
             st->text_x_pts = st->line_x_pts;
             st->text_y_pts = st->line_y_pts;
             continue;
         }
-        if (c < 32u) {
+        if (cp < 32u) {
             continue;
         }
-        if (c >= 127u) {
+        unsigned char draw = pdf_codepoint_to_ascii(cp);
+        if (draw >= 32u) {
+            pdf_draw_glyph(st, draw);
+        }
+        if (draw == ' ' || cp == 0x00A0u) {
+            st->text_x_pts += st->font_size_pts * pdf_char_advance_em(' ');
+        } else if (draw == '?' && cp >= 128u) {
             st->text_x_pts += st->font_size_pts * 0.5f;
-            continue;
+        } else {
+            st->text_x_pts += st->font_size_pts * pdf_char_advance_em(draw);
         }
-        pdf_draw_glyph(st, c);
-        st->text_x_pts += st->font_size_pts * pdf_char_advance_em(c);
     }
 }
 
@@ -2523,6 +3144,10 @@ static void pdf_execute_operator(pdf_render_state *st, const char *op,
         st->in_text = 0;
     } else if (strcmp(op, "Tf") == 0) {
         if (n >= 2 && pdf_expect_str(&ops[n - 2]) && pdf_expect_num(&ops[n - 1])) {
+            st->current_font = NULL;
+            if (st->font_table && ops[n - 2].str) {
+                st->current_font = pdf_font_table_find(st->font_table, ops[n - 2].str);
+            }
             float fs = (float)ops[n - 1].num;
             if (fs > 0.1f && fs < 500.0f) {
                 st->font_size_pts = fs;
@@ -2695,6 +3320,7 @@ static void pdf_execute_operator(pdf_render_state *st, const char *op,
 }
 
 static int pdf_render_content_stream(const unsigned char *stream, size_t stream_len,
+                                     const pdf_font_table *font_table,
                                      cupidimage_image *img, int page_height_pts,
                                      char *err, size_t errcap) {
     pdf_render_state st;
@@ -2717,6 +3343,8 @@ static int pdf_render_content_stream(const unsigned char *stream, size_t stream_
     st.gs_stack_len = 0;
     pdf_path_clear(&st.path);
     st.in_text = 0;
+    st.font_table = font_table;
+    st.current_font = NULL;
 
     pdf_operand ops[64];
     int op_count = 0;
@@ -2891,8 +3519,17 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
         return 0;
     }
 
+    pdf_font_table fonts;
+    pdf_font_table_init(&fonts);
+    if (!pdf_collect_page_fonts(data, size, page_obj, &fonts, err, errcap)) {
+        /* Keep rendering even if font metadata parsing fails. */
+        pdf_font_table_free(&fonts);
+        pdf_font_table_init(&fonts);
+    }
+
     int page_width_pts = 0, page_height_pts = 0;
     if (!get_page_mediabox(data, size, &xref, page_obj, &page_width_pts, &page_height_pts, err, errcap)) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         return 0;
     }
@@ -2900,6 +3537,7 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
     int width = (page_width_pts * 96) / 72;
     int height = (page_height_pts * 96) / 72;
     if (width <= 0 || height <= 0) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         set_err(err, errcap, "pdf: invalid page dimensions");
         return 0;
@@ -2907,11 +3545,13 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
 
     size_t pixel_count = (size_t)width * (size_t)height;
     if (height > 0 && pixel_count / (size_t)height != (size_t)width) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         set_err(err, errcap, "pdf: image too large");
         return 0;
     }
     if (pixel_count > SIZE_MAX / 4u) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         set_err(err, errcap, "pdf: image too large");
         return 0;
@@ -2921,6 +3561,7 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
     img->height = (uint32_t)height;
     img->rgba = (unsigned char *)calloc(pixel_count * 4u, 1);
     if (!img->rgba) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         set_err(err, errcap, "pdf: out of memory");
         return 0;
@@ -2937,6 +3578,7 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
     size_t stream_len = 0;
     int is_flate = 0;
     if (!get_page_content_stream(data, size, &xref, page_obj, &stream_data, &stream_len, &is_flate, err, errcap)) {
+        pdf_font_table_free(&fonts);
         free(xref.entries);
         free(img->rgba);
         img->rgba = NULL;
@@ -2952,6 +3594,7 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
             size_t inflated_len = 0;
             if (!pdf_inflate_auto(stream_data, stream_len, &inflated, &inflated_len)) {
                 free(stream_data);
+                pdf_font_table_free(&fonts);
                 free(xref.entries);
                 free(img->rgba);
                 img->rgba = NULL;
@@ -2962,9 +3605,10 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
             render_len = inflated_len;
         }
 
-        if (!pdf_render_content_stream(render_data, render_len, img, page_height_pts, err, errcap)) {
+        if (!pdf_render_content_stream(render_data, render_len, &fonts, img, page_height_pts, err, errcap)) {
             free(inflated);
             free(stream_data);
+            pdf_font_table_free(&fonts);
             free(xref.entries);
             free(img->rgba);
             img->rgba = NULL;
@@ -2980,6 +3624,7 @@ static int cupidimage_load_pdf_internal(const unsigned char *data, size_t size,
     img->hotspot_x = 0;
     img->hotspot_y = 0;
 
+    pdf_font_table_free(&fonts);
     free(xref.entries);
     return 1;
 }
