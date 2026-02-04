@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
+  <defs>
+    <style>
+      .a + .b { fill: #06d6a0; }
+      .a ~ .c { fill: #ef476f; }
+    </style>
+    <filter id="blendOverlay" x="-10%" y="-10%" width="120%" height="120%">
+      <feFlood flood-color="#118ab2" flood-opacity="70%" result="f"/>
+      <feBlend mode="overlay" in="SourceGraphic" in2="f"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="360" height="220" fill="#ffffff"/>
+  <rect class="a" x="20" y="20" width="70" height="36" fill="#ffd166"/>
+  <rect class="b" x="100" y="20" width="70" height="36" fill="#cccccc"/>
+  <rect class="c" x="180" y="20" width="70" height="36" fill="#cccccc"/>
+  <rect class="d" x="260" y="20" width="70" height="36" fill="#cccccc"/>
+
+  <text x="20" y="110" font-size="20" fill="#111827">• bullet one</text>
+  <text x="20" y="142" font-size="20" fill="#111827">• bullet two</text>
+
+  <rect x="20" y="170" width="120" height="34" fill="#ffd166" filter="url(#blendOverlay)"/>
+</svg>

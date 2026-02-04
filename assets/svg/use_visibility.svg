@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220">
+  <defs>
+    <rect id="tileRect" x="0" y="0" width="36" height="24" rx="4" ry="4"
+          fill="#8ecae6" stroke="#1d3557" stroke-width="2"/>
+    <circle id="tileCircle" cx="18" cy="12" r="9" fill="#ffb703" stroke="#fb8500" stroke-width="2"/>
+    <polygon id="tilePoly" points="2,22 18,2 34,22" fill="#90be6d" stroke="#2d6a4f" stroke-width="2"/>
+  </defs>
+
+  <rect x="0" y="0" width="320" height="220" fill="#f1faee"/>
+
+  <use href="#tileRect" x="20" y="20"/>
+  <use href="#tileCircle" x="70" y="20"/>
+  <use href="#tilePoly" x="120" y="20"/>
+
+  <use href="#tileRect" x="20" y="60" fill="#ffafcc" stroke="#6d597a"/>
+  <use href="#tileCircle" x="70" y="60" fill="#ffd166" stroke="#9c6644"/>
+  <use href="#tilePoly" x="120" y="60" fill="#2a9d8f" stroke="#264653"/>
+
+  <g visibility="hidden">
+    <use href="#tileRect" x="20" y="110"/>
+    <use href="#tileCircle" x="70" y="110"/>
+    <use href="#tilePoly" x="120" y="110"/>
+  </g>
+
+  <g display="none">
+    <rect x="180" y="20" width="110" height="70" fill="#e63946"/>
+  </g>
+
+  <g visibility="hidden">
+    <g visibility="visible">
+      <rect x="180" y="110" width="110" height="70" fill="#457b9d"/>
+      <text x="188" y="150" font-size="12" fill="#ffffff">visible child</text>
+    </g>
+  </g>
+</svg>

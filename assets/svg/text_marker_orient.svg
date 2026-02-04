@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
+  <defs>
+    <marker id="arrowRev" refX="10" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse" viewBox="0 0 10 10">
+      <path d="M0 0 L10 5 L0 10 z" fill="#1d3557"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="360" height="220" fill="#ffffff"/>
+  <line x1="30" y1="40" x2="330" y2="40" stroke="#457b9d" stroke-width="5"
+        marker-start="url(#arrowRev)" marker-end="url(#arrowRev)"/>
+
+  <line x1="30" y1="84" x2="330" y2="84" stroke="#2a9d8f" stroke-width="4"
+        marker-start="url(#arrowRev)" marker-mid="url(#arrowRev)" marker-end="url(#arrowRev)"/>
+
+  <text x="24" y="140" font-size="20" fill="#111827">alphabetic baseline</text>
+  <text x="24" y="170" font-size="20" dominant-baseline="middle" fill="#111827">middle baseline</text>
+  <text x="24" y="200" font-size="20" dominant-baseline="hanging" fill="#111827">hanging baseline</text>
+
+  <line x1="20" y1="140" x2="340" y2="140" stroke="#e63946" stroke-width="1"/>
+  <line x1="20" y1="170" x2="340" y2="170" stroke="#e63946" stroke-width="1"/>
+  <line x1="20" y1="200" x2="340" y2="200" stroke="#e63946" stroke-width="1"/>
+</svg>

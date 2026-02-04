@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <rect id="box" x="0" y="0" width="64" height="44" rx="6" ry="6"
+          fill="#457b9d" stroke="#1d3557" stroke-width="4"/>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff006e" stop-opacity="20%"/>
+      <stop offset="100%" stop-color="#3a86ff" stop-opacity="80%"/>
+    </linearGradient>
+    <filter id="flood" x="-20%" y="-20%" width="140%" height="140%">
+      <feFlood flood-color="#fb8500" flood-opacity="35%" result="f"/>
+      <feComposite in="f" in2="SourceGraphic" operator="atop"/>
+    </filter>
+  </defs>
+
+  <rect x="0" y="0" width="320" height="200" fill="#ffffff"/>
+
+  <use href="#box" x="20" y="24"/>
+  <use href="#box" x="100" y="24" fill="#e63946" stroke="#6a040f"/>
+  <use href="#box" x="180" y="24" style="fill:#2a9d8f;stroke:#264653"/>
+
+  <rect x="20" y="96" width="90" height="64" fill="url(#g)" stroke="#111" stroke-width="2"/>
+  <rect x="130" y="96" width="90" height="64" fill="#8338ec" fill-opacity="40%" stroke="#111" stroke-width="2"/>
+  <rect x="240" y="96" width="60" height="64" fill="#ffbe0b" opacity="55%" filter="url(#flood)"/>
+</svg>

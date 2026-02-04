@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <defs>
+    <style>
+      [data-role] { opacity: 0.85; }
+      [data-role="target"] { fill: #06d6a0; }
+      g[data-group] rect { stroke: #1d3557; stroke-width: 3; }
+      g[data-group] > rect { fill: #ffd166; }
+      g[data-group] [data-role="target"] { fill: #ef476f; }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="320" height="200" fill="#f8f9fa"/>
+  <g data-group="alpha" transform="translate(20 20)">
+    <rect x="0" y="0" width="120" height="50" data-role="plain"/>
+    <rect x="0" y="70" width="120" height="50" data-role="target"/>
+  </g>
+  <g transform="translate(180 20)">
+    <rect x="0" y="0" width="120" height="50" data-role="target"/>
+    <rect x="0" y="70" width="120" height="50"/>
+  </g>
+</svg>
