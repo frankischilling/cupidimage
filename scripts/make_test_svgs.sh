@@ -8,9 +8,15 @@ OUTDIR="$OUTDIR" python3 - <<'PY'
 from pathlib import Path
 import os
 import textwrap
+import base64
 
 outdir = Path(os.environ.get("OUTDIR", "assets/svg"))
 outdir.mkdir(parents=True, exist_ok=True)
+
+orange_svg_data = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='#fb8500'/></svg>"
+blue_svg_data = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><rect width='20' height='20' fill='#3a86ff'/></svg>"
+orange_svg_uri = "data:image/svg+xml," + orange_svg_data.replace("<", "%3C").replace(">", "%3E").replace("#", "%23").replace(" ", "%20")
+blue_svg_uri_b64 = "data:image/svg+xml;base64," + base64.b64encode(blue_svg_data.encode("utf-8")).decode("ascii")
 
 def write(name: str, content: str) -> None:
     path = outdir / name
@@ -400,6 +406,82 @@ write("filter_inputs.svg", r"""
   <rect x="0" y="0" width="320" height="200" fill="url(#bg)"/>
   <rect x="40" y="40" width="240" height="120" rx="16" ry="16"
         fill="#ffb703" stroke="#fb8500" stroke-width="10" filter="url(#paintmix)"/>
+</svg>
+""")
+
+write("image_data_uri.svg", f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="200" viewBox="0 0 340 200">
+  <rect x="0" y="0" width="340" height="200" fill="#ffffff"/>
+  <image href="{orange_svg_uri}" x="20" y="20" width="120" height="80" preserveAspectRatio="none"/>
+  <image href="{blue_svg_uri_b64}" x="180" y="20" width="120" height="80" preserveAspectRatio="xMidYMid meet" opacity="0.85"/>
+</svg>
+""")
+
+write("filter_feimage_data_uri.svg", f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="340" height="200" viewBox="0 0 340 200">
+  <defs>
+    <filter id="fimg" x="-10%" y="-10%" width="120%" height="120%">
+      <feImage href="{blue_svg_uri_b64}" x="0" y="0" width="120" height="80" result="img"/>
+      <feComposite in="img" in2="SourceGraphic" operator="over"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="340" height="200" fill="#ffffff"/>
+  <rect x="20" y="20" width="120" height="80" fill="#fb8500" filter="url(#fimg)"/>
+</svg>
+""")
+
+write("animation_basic.svg", r"""
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80" viewBox="0 0 120 80">
+  <rect x="0" y="0" width="120" height="80" fill="#ffffff"/>
+
+  <rect x="10" y="16" width="20" height="20" fill="#f97316">
+    <animate attributeName="x" from="10" to="90" dur="4s" fill="freeze"/>
+  </rect>
+
+  <rect x="50" y="10" width="20" height="12" fill="#2563eb">
+    <animateTransform attributeName="transform" type="translate"
+                      from="0 0" to="0 40" dur="2s" fill="freeze"/>
+  </rect>
+</svg>
+""")
+
+write("css_keyframes_basic.svg", r"""
+<svg xmlns="http://www.w3.org/2000/svg" width="140" height="90" viewBox="0 0 140 90">
+  <style>
+    #mover { animation: move 2s linear infinite; }
+    @keyframes move {
+      0% { transform: translate(10, 52); }
+      100% { transform: translate(90, 52); }
+    }
+
+    #s0 { animation: pulse0 2s linear infinite; }
+    @keyframes pulse0 {
+      0% { stop-color: #fb8500; }
+      50% { stop-color: #22c55e; }
+      100% { stop-color: #fb8500; }
+    }
+  </style>
+
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop id="s0" offset="0%" stop-color="#fb8500"/>
+      <stop offset="100%" stop-color="#3a86ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="140" height="90" fill="#ffffff"/>
+  <rect x="10" y="10" width="120" height="24" fill="url(#g)"/>
+
+  <g id="mover" transform="translate(10,52)">
+    <rect x="0" y="0" width="20" height="20" fill="#2563eb"/>
+  </g>
+</svg>
+""")
+
+write("text_cdata.svg", r"""
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="100" viewBox="0 0 220 100">
+  <rect x="0" y="0" width="220" height="100" fill="#ffffff"/>
+  <text x="20" y="60" font-size="28" fill="#111111"><![CDATA[CDATA TEXT]]></text>
 </svg>
 """)
 
