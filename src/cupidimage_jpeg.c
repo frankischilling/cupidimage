@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -771,7 +772,7 @@ static int jpeg_progressive_finish(jpeg_comp *comps, int num_comp,
                                    int width, int height,
                                    int mcu_cols, int mcu_rows,
                                    int hmax, int vmax,
-                                   const int qtables[4][64],
+                                   int qtables[4][64],
                                    int adobe_transform,
                                    cupidimage_image *out,
                                    char *err, size_t errcap) {
@@ -974,7 +975,7 @@ static int jpeg_decode_scan(const uint8_t *data, size_t size,
                             jpeg_comp *comps, int num_comp,
                             int width, int height,
                             int hmax, int vmax,
-                            const int qtables[4][64],
+                            int qtables[4][64],
                             const jpeg_huff dc_tables[4],
                             const jpeg_huff ac_tables[4],
                             int restart_interval,
@@ -1591,51 +1592,7 @@ fail:
 
 int cupidimage_load_jpeg_file(const char *path, cupidimage_image *out,
                               char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_jpeg(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_jpeg);
 }
 
 int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_image *out,
@@ -1701,49 +1658,5 @@ int cupidimage_load_image(const unsigned char *data, size_t size, cupidimage_ima
 
 int cupidimage_load_image_file(const char *path, cupidimage_image *out,
                                char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_image(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_image);
 }

@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -732,7 +733,7 @@ int cupidimage_load_bmp(const unsigned char *data, size_t size,
                 } else if (bit_count == 1) {
                     uint8_t byte = src_row[x / 8u];
                     unsigned shift = 7u - (x % 8u);
-                    idx = (uint8_t)((byte >> shift) & 0x01u);
+                    idx = (uint8_t)(((uint32_t)byte >> shift) & 0x01u);
                 }
                 if (idx >= palette_entries) {
                     free(out->rgba);
@@ -852,49 +853,5 @@ int cupidimage_load_bmp(const unsigned char *data, size_t size,
 
 int cupidimage_load_bmp_file(const char *path, cupidimage_image *out,
                              char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_bmp(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_bmp);
 }

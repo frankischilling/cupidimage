@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -514,11 +515,11 @@ static uint8_t palette_index_at(const uint8_t *row, uint32_t x, uint8_t bit_dept
     if (bit_depth == 2) {
         uint8_t byte = row[x / 4u];
         unsigned shift = 6u - 2u * (x % 4u);
-        return (uint8_t)((byte >> shift) & 0x03u);
+        return (uint8_t)(((uint32_t)byte >> shift) & 0x03u);
     }
     uint8_t byte = row[x / 8u];
     unsigned shift = 7u - (x % 8u);
-    return (uint8_t)((byte >> shift) & 0x01u);
+    return (uint8_t)(((uint32_t)byte >> shift) & 0x01u);
 }
 
 static uint8_t gray_sample_at(const uint8_t *row, uint32_t x, uint8_t bit_depth) {
@@ -532,11 +533,11 @@ static uint8_t gray_sample_at(const uint8_t *row, uint32_t x, uint8_t bit_depth)
     if (bit_depth == 2) {
         uint8_t byte = row[x / 4u];
         unsigned shift = 6u - 2u * (x % 4u);
-        return (uint8_t)((byte >> shift) & 0x03u);
+        return (uint8_t)(((uint32_t)byte >> shift) & 0x03u);
     }
     uint8_t byte = row[x / 8u];
     unsigned shift = 7u - (x % 8u);
-    return (uint8_t)((byte >> shift) & 0x01u);
+    return (uint8_t)(((uint32_t)byte >> shift) & 0x01u);
 }
 
 static uint8_t sample16_to_8(uint16_t v) {
@@ -577,18 +578,18 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
     uint8_t *idat = NULL;
     size_t idat_size = 0;
 
-    size_t off = 8;
-    while (off + 8 <= size) {
-        uint32_t length = read_be32(data + off);
-        const unsigned char *type = data + off + 4;
-        off += 8;
-        if (off + length + 4 > size) {
+    size_t chunk_off = 8;
+    while (chunk_off + 8 <= size) {
+        uint32_t length = read_be32(data + chunk_off);
+        const unsigned char *type = data + chunk_off + 4;
+        chunk_off += 8;
+        if (chunk_off + length + 4 > size) {
             free(idat);
             set_err(err, errcap, "truncated PNG");
             return 0;
         }
 
-        const unsigned char *chunk = data + off;
+        const unsigned char *chunk = data + chunk_off;
 
         if (memcmp(type, "IHDR", 4) == 0) {
             if (length != 13) {
@@ -633,7 +634,7 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
             break;
         }
 
-        off += length + 4;
+        chunk_off += length + 4;
     }
 
     if (width == 0 || height == 0) {
@@ -857,15 +858,15 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
         return 1;
     }
 
-    static const int pass_x[7] = {0, 4, 0, 2, 0, 1, 0};
-    static const int pass_y[7] = {0, 0, 4, 0, 2, 0, 1};
-    static const int pass_dx[7] = {8, 8, 4, 4, 2, 2, 1};
-    static const int pass_dy[7] = {8, 8, 8, 4, 4, 2, 2};
+    static const uint32_t pass_x[7] = {0u, 4u, 0u, 2u, 0u, 1u, 0u};
+    static const uint32_t pass_y[7] = {0u, 0u, 4u, 0u, 2u, 0u, 1u};
+    static const uint32_t pass_dx[7] = {8u, 8u, 4u, 4u, 2u, 2u, 1u};
+    static const uint32_t pass_dy[7] = {8u, 8u, 8u, 4u, 4u, 2u, 2u};
 
     size_t total_raw = 0;
     for (int p = 0; p < 7; p++) {
-        uint32_t pw = (width > (uint32_t)pass_x[p]) ? (uint32_t)((width - pass_x[p] + pass_dx[p] - 1) / pass_dx[p]) : 0;
-        uint32_t ph = (height > (uint32_t)pass_y[p]) ? (uint32_t)((height - pass_y[p] + pass_dy[p] - 1) / pass_dy[p]) : 0;
+        uint32_t pw = (width > pass_x[p]) ? ((width - pass_x[p] + pass_dx[p] - 1u) / pass_dx[p]) : 0u;
+        uint32_t ph = (height > pass_y[p]) ? ((height - pass_y[p] + pass_dy[p] - 1u) / pass_dy[p]) : 0u;
         if (pw == 0 || ph == 0) {
             continue;
         }
@@ -914,8 +915,8 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
 
     size_t offset = 0;
     for (int p = 0; p < 7; p++) {
-        uint32_t pw = (width > (uint32_t)pass_x[p]) ? (uint32_t)((width - pass_x[p] + pass_dx[p] - 1) / pass_dx[p]) : 0;
-        uint32_t ph = (height > (uint32_t)pass_y[p]) ? (uint32_t)((height - pass_y[p] + pass_dy[p] - 1) / pass_dy[p]) : 0;
+        uint32_t pw = (width > pass_x[p]) ? ((width - pass_x[p] + pass_dx[p] - 1u) / pass_dx[p]) : 0u;
+        uint32_t ph = (height > pass_y[p]) ? ((height - pass_y[p] + pass_dy[p] - 1u) / pass_dy[p]) : 0u;
         if (pw == 0 || ph == 0) {
             continue;
         }
@@ -953,9 +954,9 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
 
         for (uint32_t y = 0; y < ph; y++) {
             const uint8_t *src = recon + (size_t)y * pass_rowbytes;
-            uint32_t dest_y = (uint32_t)pass_y[p] + y * (uint32_t)pass_dy[p];
+            uint32_t dest_y = pass_y[p] + y * pass_dy[p];
             for (uint32_t x = 0; x < pw; x++) {
-                uint32_t dest_x = (uint32_t)pass_x[p] + x * (uint32_t)pass_dx[p];
+                uint32_t dest_x = pass_x[p] + x * pass_dx[p];
                 uint8_t *dst = rgba + ((size_t)dest_y * (size_t)width + (size_t)dest_x) * 4u;
                 if (color_type == 0) {
                     if (bit_depth == 16) {
@@ -1058,49 +1059,5 @@ int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image
 }
 
 int cupidimage_load_png_file(const char *path, cupidimage_image *out, char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_png(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_png);
 }

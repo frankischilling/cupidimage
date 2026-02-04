@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1872,9 +1873,9 @@ static uint32_t tiff_read_sample(const tiff_context *ctx, const uint8_t *row, ui
         uint8_t byte = row[pos / 8u];
         uint32_t bit = pos & 7u;
         if (fill_order == TIFF_FILL_ORDER_LSB2MSB) {
-            v = (v << 1) | ((byte >> bit) & 1u);
+            v = (v << 1) | (((uint32_t)byte >> bit) & 1u);
         } else {
-            v = (v << 1) | ((byte >> (7u - bit)) & 1u);
+            v = (v << 1) | (((uint32_t)byte >> (7u - bit)) & 1u);
         }
     }
     return v;
@@ -2771,6 +2772,8 @@ static int tiff_decode_ycbcr_subsampled(const tiff_context *ctx, const tiff_imag
                 uint8_t cr = buf[pos++];
                 int cbi = (int)cb - 128;
                 int cri = (int)cr - 128;
+                double cbi_d = (double)cbi;
+                double cri_d = (double)cri;
                 for (uint32_t ry = 0; ry < vsub; ry++) {
                     uint32_t y = (uint32_t)row_start + (uint32_t)by * vsub + ry;
                     if (y >= info->height) {
@@ -2782,9 +2785,9 @@ static int tiff_decode_ycbcr_subsampled(const tiff_context *ctx, const tiff_imag
                             continue;
                         }
                         uint8_t yv = yblock[(size_t)ry * hsub + rx];
-                        int ri = (int)yv + (int)(1.402f * cri);
-                        int gi = (int)yv - (int)(0.344136f * cbi) - (int)(0.714136f * cri);
-                        int bi = (int)yv + (int)(1.772f * cbi);
+                        int ri = (int)((double)yv + (1.402 * cri_d));
+                        int gi = (int)((double)yv - (0.344136 * cbi_d) - (0.714136 * cri_d));
+                        int bi = (int)((double)yv + (1.772 * cbi_d));
                         size_t dst = ((size_t)y * (size_t)info->width + x) * 4u;
                         rgba[dst + 0] = tiff_clamp8(ri);
                         rgba[dst + 1] = tiff_clamp8(gi);
@@ -2878,6 +2881,7 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
     for (uint32_t y = 0; y < info->height; y++) {
         const uint8_t *row = raw + (size_t)y * row_bytes;
         for (uint32_t x = 0; x < info->width; x++) {
+            uint32_t sample_base = x * (uint32_t)samples;
             uint8_t r = 0;
             uint8_t g = 0;
             uint8_t b = 0;
@@ -2885,13 +2889,13 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
 
             if (photometric == TIFF_PHOTOMETRIC_RGB) {
                 if (float_samples) {
-                    r = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 0, bps));
-                    g = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 1, bps));
-                    b = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 2, bps));
+                    r = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 0u, bps));
+                    g = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 1u, bps));
+                    b = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 2u, bps));
                 } else {
-                    uint32_t r0 = tiff_read_sample(ctx, row, x * samples + 0, bps, info->fill_order);
-                    uint32_t g0 = tiff_read_sample(ctx, row, x * samples + 1, bps, info->fill_order);
-                    uint32_t b0 = tiff_read_sample(ctx, row, x * samples + 2, bps, info->fill_order);
+                    uint32_t r0 = tiff_read_sample(ctx, row, sample_base + 0u, bps, info->fill_order);
+                    uint32_t g0 = tiff_read_sample(ctx, row, sample_base + 1u, bps, info->fill_order);
+                    uint32_t b0 = tiff_read_sample(ctx, row, sample_base + 2u, bps, info->fill_order);
                     r = tiff_scale_sample(r0, bps);
                     g = tiff_scale_sample(g0, bps);
                     b = tiff_scale_sample(b0, bps);
@@ -2900,9 +2904,9 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
                        photometric == TIFF_PHOTOMETRIC_WHITE_IS_ZERO) {
                 uint8_t gray = 0;
                 if (float_samples) {
-                    gray = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples, bps));
+                    gray = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base, bps));
                 } else {
-                    uint32_t v = tiff_read_sample(ctx, row, x * samples, bps, info->fill_order);
+                    uint32_t v = tiff_read_sample(ctx, row, sample_base, bps, info->fill_order);
                     gray = tiff_scale_sample(v, bps);
                 }
                 if (photometric == TIFF_PHOTOMETRIC_WHITE_IS_ZERO) {
@@ -2910,7 +2914,7 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
                 }
                 r = g = b = gray;
             } else if (photometric == TIFF_PHOTOMETRIC_PALETTE) {
-                uint32_t idx = tiff_read_sample(ctx, row, x * samples, bps, info->fill_order);
+                uint32_t idx = tiff_read_sample(ctx, row, sample_base, bps, info->fill_order);
                 if (idx >= palette_len) {
                     set_err(err, errcap, "invalid TIFF palette index");
                     return 0;
@@ -2924,40 +2928,42 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
             } else if (photometric == TIFF_PHOTOMETRIC_CMYK) {
                 uint8_t c, m, yv, k;
                 if (float_samples) {
-                    c = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 0, bps));
-                    m = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 1, bps));
-                    yv = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 2, bps));
-                    k = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + 3, bps));
+                    c = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 0u, bps));
+                    m = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 1u, bps));
+                    yv = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 2u, bps));
+                    k = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + 3u, bps));
                 } else {
-                    c = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 0, bps, info->fill_order), bps);
-                    m = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 1, bps, info->fill_order), bps);
-                    yv = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 2, bps, info->fill_order), bps);
-                    k = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 3, bps, info->fill_order), bps);
+                    c = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 0u, bps, info->fill_order), bps);
+                    m = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 1u, bps, info->fill_order), bps);
+                    yv = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 2u, bps, info->fill_order), bps);
+                    k = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 3u, bps, info->fill_order), bps);
                 }
                 r = (uint8_t)(((255u - c) * (255u - k) + 127u) / 255u);
                 g = (uint8_t)(((255u - m) * (255u - k) + 127u) / 255u);
                 b = (uint8_t)(((255u - yv) * (255u - k) + 127u) / 255u);
             } else if (photometric == TIFF_PHOTOMETRIC_YCBCR) {
-                uint8_t yv = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 0, bps, info->fill_order), bps);
-                uint8_t cb = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 1, bps, info->fill_order), bps);
-                uint8_t cr = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 2, bps, info->fill_order), bps);
+                uint8_t yv = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 0u, bps, info->fill_order), bps);
+                uint8_t cb = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 1u, bps, info->fill_order), bps);
+                uint8_t cr = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 2u, bps, info->fill_order), bps);
                 int cbi = (int)cb - 128;
                 int cri = (int)cr - 128;
-                int ri = (int)yv + (int)(1.402f * cri);
-                int gi = (int)yv - (int)(0.344136f * cbi) - (int)(0.714136f * cri);
-                int bi = (int)yv + (int)(1.772f * cbi);
+                double cbi_d = (double)cbi;
+                double cri_d = (double)cri;
+                int ri = (int)((double)yv + (1.402 * cri_d));
+                int gi = (int)((double)yv - (0.344136 * cbi_d) - (0.714136 * cri_d));
+                int bi = (int)((double)yv + (1.772 * cbi_d));
                 r = tiff_clamp8(ri);
                 g = tiff_clamp8(gi);
                 b = tiff_clamp8(bi);
             } else if (photometric == TIFF_PHOTOMETRIC_CIELAB) {
-                uint8_t l8 = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 0, bps, info->fill_order), bps);
-                uint8_t a8 = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 1, bps, info->fill_order), bps);
-                uint8_t b8 = tiff_scale_sample(tiff_read_sample(ctx, row, x * samples + 2, bps, info->fill_order), bps);
+                uint8_t l8 = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 0u, bps, info->fill_order), bps);
+                uint8_t a8 = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 1u, bps, info->fill_order), bps);
+                uint8_t b8 = tiff_scale_sample(tiff_read_sample(ctx, row, sample_base + 2u, bps, info->fill_order), bps);
                 double L = ((double)l8 * 100.0) / 255.0;
-                double a = (double)a8 - 128.0;
+                double aa = (double)a8 - 128.0;
                 double bb = (double)b8 - 128.0;
                 double fy = (L + 16.0) / 116.0;
-                double fx = fy + (a / 500.0);
+                double fx = fy + (aa / 500.0);
                 double fz = fy - (bb / 200.0);
                 double xr = (fx * fx * fx > 0.008856) ? fx * fx * fx : (fx - 16.0 / 116.0) / 7.787;
                 double yr = (fy * fy * fy > 0.008856) ? fy * fy * fy : (fy - 16.0 / 116.0) / 7.787;
@@ -2978,9 +2984,9 @@ static int tiff_convert_to_rgba(const tiff_context *ctx, const tiff_image_info *
 
             if (alpha_index >= 0) {
                 if (float_samples) {
-                    a = tiff_scale_float(tiff_read_sample_float(ctx, row, x * samples + (uint32_t)alpha_index, bps));
+                    a = tiff_scale_float(tiff_read_sample_float(ctx, row, sample_base + (uint32_t)alpha_index, bps));
                 } else {
-                    uint32_t av = tiff_read_sample(ctx, row, x * samples + (uint32_t)alpha_index,
+                    uint32_t av = tiff_read_sample(ctx, row, sample_base + (uint32_t)alpha_index,
                                                    bps, info->fill_order);
                     a = tiff_scale_sample(av, bps);
                 }
@@ -3505,49 +3511,5 @@ int cupidimage_get_tiff_page_count(const unsigned char *data, size_t size,
 int cupidimage_load_tiff_file(const char *path,
                               cupidimage_image *out,
                               char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_tiff(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_tiff);
 }

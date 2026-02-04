@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -30,60 +31,6 @@ static uint16_t read_le16(const unsigned char *p) {
 
 static uint32_t read_le32(const unsigned char *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static int ico_read_file(const char *path, unsigned char **data, size_t *size,
-                         char *err, size_t errcap) {
-    if (!path || !data || !size) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if ((unsigned long)fsize > SIZE_MAX) {
-        fclose(f);
-        set_err(err, errcap, "file too large");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    *data = buf;
-    *size = (size_t)fsize;
-    return 1;
 }
 
 static int ico_parse_directory(const unsigned char *data, size_t size,
@@ -388,7 +335,7 @@ static int ico_decode_dib(const unsigned char *data, size_t size,
                 } else if (bitcount == 1) {
                     uint8_t byte = src[x / 8u];
                     unsigned shift = 7u - (x & 7u);
-                    idx = (uint8_t)((byte >> shift) & 0x01u);
+                    idx = (uint8_t)(((uint32_t)byte >> shift) & 0x01u);
                 }
                 if (idx >= palette_entries) {
                     free(out->rgba);
@@ -435,7 +382,7 @@ static int ico_decode_dib(const unsigned char *data, size_t size,
                 for (uint32_t x = 0; x < width; x++) {
                     uint8_t byte = mask_row[x / 8u];
                     unsigned shift = 7u - (x & 7u);
-                    int bit = (byte >> shift) & 0x01u;
+                    int bit = (int)(((uint32_t)byte >> shift) & 0x01u);
                     if (bit) {
                         dst[x * 4u + 3u] = 0;
                     } else if (bitcount != 32) {
@@ -536,7 +483,7 @@ int cupidimage_load_ico_page(const char *path,
 
     unsigned char *data = NULL;
     size_t size = 0;
-    if (!ico_read_file(path, &data, &size, err, errcap)) {
+    if (!cupidimage_read_file_bytes(path, &data, &size, err, errcap)) {
         return 0;
     }
 
@@ -560,7 +507,7 @@ int cupidimage_ico_get_directory(const char *path,
 
     unsigned char *data = NULL;
     size_t size = 0;
-    if (!ico_read_file(path, &data, &size, err, errcap)) {
+    if (!cupidimage_read_file_bytes(path, &data, &size, err, errcap)) {
         return 0;
     }
 

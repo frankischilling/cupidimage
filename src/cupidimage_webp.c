@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 #include "cupidimage_webp_tables.h"
 #include "cupidimage_webp_lossless.h"
 
@@ -259,12 +260,12 @@ static int vp8_read_tree_skip_eob(vp8_bool_decoder *br, const int16_t *tree, con
     return -i;
 }
 
-static int avg2p(int x, int y) {
-    return (x + y + 1) >> 1;
+static uint8_t avg2p(int x, int y) {
+    return (uint8_t)((x + y + 1) >> 1);
 }
 
-static int avg3p(int x, int y, int z) {
-    return (x + 2 * y + z + 2) >> 2;
+static uint8_t avg3p(int x, int y, int z) {
+    return (uint8_t)((x + 2 * y + z + 2) >> 2);
 }
 
 static void subblock_intra_predict(uint8_t *dst, int stride,
@@ -332,14 +333,14 @@ static void subblock_intra_predict(uint8_t *dst, int stride,
         dst[stride * 3 + 0] = avg3p(E[8], E[7], E[6]);
         break;
     case B_VR_PRED: {
-        int a = avg2p(E[4], E[5]);
-        int b = avg2p(E[5], E[6]);
-        int c = avg2p(E[6], E[7]);
-        int d = avg2p(E[7], E[8]);
-        int e = avg3p(E[3], E[4], E[5]);
-        int f = avg3p(E[4], E[5], E[6]);
-        int g = avg3p(E[5], E[6], E[7]);
-        int h = avg3p(E[6], E[7], E[8]);
+        uint8_t a = avg2p(E[4], E[5]);
+        uint8_t b = avg2p(E[5], E[6]);
+        uint8_t c = avg2p(E[6], E[7]);
+        uint8_t d = avg2p(E[7], E[8]);
+        uint8_t e = avg3p(E[3], E[4], E[5]);
+        uint8_t f = avg3p(E[4], E[5], E[6]);
+        uint8_t g = avg3p(E[5], E[6], E[7]);
+        uint8_t h = avg3p(E[6], E[7], E[8]);
         dst[0] = b;
         dst[1] = c;
         dst[2] = d;
@@ -359,14 +360,14 @@ static void subblock_intra_predict(uint8_t *dst, int stride,
         break;
     }
     case B_VL_PRED: {
-        int a = avg2p(E[5], E[6]);
-        int b = avg2p(E[6], E[7]);
-        int c = avg2p(E[7], E[8]);
-        int d = avg2p(E[8], E[9]);
-        int e = avg3p(E[5], E[6], E[7]);
-        int f = avg3p(E[6], E[7], E[8]);
-        int g = avg3p(E[7], E[8], E[9]);
-        int h = avg3p(E[8], E[9], E[10]);
+        uint8_t a = avg2p(E[5], E[6]);
+        uint8_t b = avg2p(E[6], E[7]);
+        uint8_t c = avg2p(E[7], E[8]);
+        uint8_t d = avg2p(E[8], E[9]);
+        uint8_t e = avg3p(E[5], E[6], E[7]);
+        uint8_t f = avg3p(E[6], E[7], E[8]);
+        uint8_t g = avg3p(E[7], E[8], E[9]);
+        uint8_t h = avg3p(E[8], E[9], E[10]);
         dst[0] = a;
         dst[1] = b;
         dst[2] = c;
@@ -386,13 +387,13 @@ static void subblock_intra_predict(uint8_t *dst, int stride,
         break;
     }
     case B_HD_PRED: {
-        int a = avg2p(E[3], E[4]);
-        int b = avg2p(E[2], E[3]);
-        int c = avg2p(E[1], E[2]);
-        int d = avg2p(E[0], E[1]);
-        int e = avg3p(E[4], E[3], E[2]);
-        int f = avg3p(E[3], E[2], E[1]);
-        int g = avg3p(E[2], E[1], E[0]);
+        uint8_t a = avg2p(E[3], E[4]);
+        uint8_t b = avg2p(E[2], E[3]);
+        uint8_t c = avg2p(E[1], E[2]);
+        uint8_t d = avg2p(E[0], E[1]);
+        uint8_t e = avg3p(E[4], E[3], E[2]);
+        uint8_t f = avg3p(E[3], E[2], E[1]);
+        uint8_t g = avg3p(E[2], E[1], E[0]);
         dst[0] = a;
         dst[1] = e;
         dst[2] = b;
@@ -412,13 +413,13 @@ static void subblock_intra_predict(uint8_t *dst, int stride,
         break;
     }
     case B_HU_PRED: {
-        int a = avg2p(E[3], E[2]);
-        int b = avg2p(E[2], E[1]);
-        int c = avg2p(E[1], E[0]);
-        int d = avg2p(E[0], E[0]);
-        int e = avg3p(E[3], E[2], E[1]);
-        int f = avg3p(E[2], E[1], E[0]);
-        int g = avg3p(E[1], E[0], E[0]);
+        uint8_t a = avg2p(E[3], E[2]);
+        uint8_t b = avg2p(E[2], E[1]);
+        uint8_t c = avg2p(E[1], E[0]);
+        uint8_t d = avg2p(E[0], E[0]);
+        uint8_t e = avg3p(E[3], E[2], E[1]);
+        uint8_t f = avg3p(E[2], E[1], E[0]);
+        uint8_t g = avg3p(E[1], E[0], E[0]);
         dst[0] = e;
         dst[1] = a;
         dst[2] = b;
@@ -798,7 +799,7 @@ static void loop_filter_plane(uint8_t *plane, int stride, int width, int height,
 
             if (base_y > 0) {
                 int top_level = filter_level_for_mb(base_level, seg_enabled, seg_abs, seg_lf,
-                                                    seg_ids[mb_index - mb_cols]);
+                                                    seg_ids[mb_index - (size_t)mb_cols]);
                 int use_level = top_level > level ? top_level : level;
                 int lim2 = 0, int2 = 0, hev2 = 0;
                 filter_params(use_level, sharpness, &lim2, &int2, &hev2);
@@ -862,7 +863,7 @@ static void decode_entropy_header(vp8_bool_decoder *br,
 }
 
 static int decode_block_coeffs(vp8_bool_decoder *br,
-                               const uint8_t coeff_probs[4][8][3][11],
+                               uint8_t coeff_probs[4][8][3][11],
                                int block_type, int ctx, int start_coeff,
                                int16_t *coeffs) {
     int prev_zero = 0;
@@ -1276,7 +1277,8 @@ static int cupidimage_decode_vp8(const unsigned char *data, size_t size,
                         uint8_t p = get_top_left(y_plane, width, x - 1, y - 1, width, height);
                         get_above_row(y_plane, width, x, y - 1, width, height, 8, 127, A);
                         get_left_col(y_plane, width, x - 1, y, width, height, 4, 129, L);
-                        subblock_intra_predict(block_pred, 4, A, L, p, b_modes[mb_index * 16 + block]);
+                        subblock_intra_predict(block_pred, 4, A, L, p,
+                                               b_modes[mb_index * 16u + (size_t)block]);
                     } else {
                         for (int iy = 0; iy < 4; iy++) {
                             memcpy(block_pred + iy * 4, pred_y + (by * 4 + iy) * 16 + bx * 4, 4);
@@ -1532,49 +1534,5 @@ int cupidimage_load_webp(const unsigned char *data, size_t size, cupidimage_imag
 
 int cupidimage_load_webp_file(const char *path, cupidimage_image *out,
                               char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_webp(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_webp);
 }

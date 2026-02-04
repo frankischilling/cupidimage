@@ -1,4 +1,5 @@
 #include "cupidimage.h"
+#include "cupidimage_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -155,11 +156,6 @@ static int tga_validate_header(const tga_header *hdr, char *err, size_t errcap) 
         set_err(err, errcap, "invalid color map type");
         return 0;
     }
-    if (hdr->width > TGA_MAX_DIM || hdr->height > TGA_MAX_DIM) {
-        set_err(err, errcap, "invalid dimensions");
-        return 0;
-    }
-
     if (hdr->image_type == 0) {
         return 1;
     }
@@ -888,51 +884,7 @@ int cupidimage_load_tga(const unsigned char *data, size_t size,
 
 int cupidimage_load_tga_file(const char *path, cupidimage_image *out,
                              char *err, size_t errcap) {
-    if (!path || !out) {
-        set_err(err, errcap, "invalid arguments");
-        return 0;
-    }
-
-    FILE *f = fopen(path, "rb");
-    if (!f) {
-        set_err(err, errcap, "failed to open file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-    long fsize = ftell(f);
-    if (fsize <= 0) {
-        fclose(f);
-        set_err(err, errcap, "empty file");
-        return 0;
-    }
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        set_err(err, errcap, "failed to seek file");
-        return 0;
-    }
-
-    unsigned char *buf = (unsigned char *)malloc((size_t)fsize);
-    if (!buf) {
-        fclose(f);
-        set_err(err, errcap, "out of memory");
-        return 0;
-    }
-
-    size_t nread = fread(buf, 1, (size_t)fsize, f);
-    fclose(f);
-    if (nread != (size_t)fsize) {
-        free(buf);
-        set_err(err, errcap, "failed to read file");
-        return 0;
-    }
-
-    int ok = cupidimage_load_tga(buf, (size_t)fsize, out, err, errcap);
-    free(buf);
-    return ok;
+    return cupidimage_load_image_file_via_memory(path, out, err, errcap, cupidimage_load_tga);
 }
 
 void cupidimage_free_tga_metadata(cupidimage_tga_metadata *meta) {
