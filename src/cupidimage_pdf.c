@@ -2163,8 +2163,8 @@ static int pdf_scanline_intersects(float x, float y, const pdf_seg *seg) {
     float y1 = seg->y1;
     /* Ensure consistent edge handling: include lower endpoint, exclude upper endpoint */
     if ((y0 < y && y1 >= y) || (y1 < y && y0 >= y)) {
-        /* Skip horizontal edges (y0 == y1) to avoid double-counting */
-        if (y0 == y1) {
+        /* Skip horizontal edges (approximately) to avoid double-counting. */
+        if (fabsf(y0 - y1) <= 1e-6f) {
             return 0;
         }
         float t = (y - y0) / (y1 - y0);
@@ -2464,7 +2464,8 @@ static void pdf_render_tj_array(pdf_render_state *st, const char *arr, size_t le
             (data[pos] >= '0' && data[pos] <= '9')) {
             double num = 0.0;
             if (pdf_parse_number_token(data, len, &pos, &num)) {
-                st->text_x_pts += (float)(-num * st->font_size_pts / 1000.0);
+                float kern_advance_pts = (float)(-num / 1000.0);
+                st->text_x_pts += kern_advance_pts * st->font_size_pts;
                 continue;
             }
         }
