@@ -2,7 +2,8 @@ cupidimage is a dependency-free C99 library for decoding common image formats an
 
 Terminal graphics output currently supports:
 - ANSI truecolor escape sequences (`48;2;R;G;B` background colors)
-- No Kitty/iTerm inline image protocol support yet
+- Kitty graphics protocol with auto-detection (direct transmission, zlib compression, chunking, animations)
+- No iTerm2 inline image protocol support yet
 - No SIXEL support yet
 
 Supported formats (decoder status):
@@ -117,6 +118,57 @@ if (!cupidimage_load_gif_animation_file("anim.gif", &anim, err, sizeof(err))) {
 }
 /* render anim.frames[i] with anim.delays[i] */
 cupidimage_free_animation(&anim);
+```
+
+Kitty graphics protocol usage (auto-detection):
+```c
+#include "cupidimage.h"
+
+int main(void) {
+    cupidimage_image img;
+    char err[128];
+
+    if (!cupidimage_load_image_file("photo.jpg", &img, err, sizeof(err))) {
+        fprintf(stderr, "Error: %s\n", err);
+        return 1;
+    }
+
+    /* Auto-detect and use Kitty protocol if available */
+    if (cupidimage_is_kitty_terminal()) {
+        cupidimage_render_kitty(&img, stdout, 0, 0, err, sizeof(err));
+    } else {
+        cupidimage_render_ansi(&img, stdout, 120, 60);
+    }
+
+    cupidimage_free(&img);
+    return 0;
+}
+```
+
+Kitty animation usage:
+```c
+cupidimage_animation anim;
+if (cupidimage_load_gif_animation_file("anim.gif", &anim, err, sizeof(err))) {
+    if (cupidimage_is_kitty_terminal()) {
+        cupidimage_render_kitty_animation(&anim, stdout, 0, 0, err, sizeof(err));
+    } else {
+        /* Manual frame-by-frame rendering */
+        for (uint32_t i = 0; i < anim.frame_count; i++) {
+            cupidimage_render_ansi(&anim.frames[i], stdout, 120, 60);
+        }
+    }
+    cupidimage_free_animation(&anim);
+}
+```
+
+Advanced Kitty options:
+```c
+cupidimage_kitty_options opts = {0};
+opts.compression = 0;           /* disable compression */
+opts.image_id = 42;            /* custom image ID */
+opts.delete_previous = 1;       /* delete previous images */
+
+cupidimage_render_kitty_with_options(&img, stdout, 0, 0, &opts, err, sizeof(err));
 ```
 
 SVG sampled animation usage:

@@ -32,4 +32,9 @@ int cupidimage_load_animation_file_via_memory(const char *path,
                                               size_t errcap,
                                               cupidimage_animation_loader_fn loader);
 
+/* Deflate compression for Kitty protocol (zlib format) */
+int cupidimage_deflate_compress(const uint8_t *data, size_t size,
+                                uint8_t *out, size_t outcap,
+                                size_t *outlen);
+
 #endif

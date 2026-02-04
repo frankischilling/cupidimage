@@ -73,6 +73,13 @@ typedef struct cupidimage_svg_options {
     uint8_t background_alpha;
 } cupidimage_svg_options;
 
+typedef struct cupidimage_kitty_options {
+    uint32_t image_id;           /* 0 = auto-generate */
+    uint32_t placement_id;       /* 0 = auto-generate */
+    int compression;             /* 1 = zlib (default), 0 = none */
+    int delete_previous;         /* 1 = delete before render, 0 = keep (default) */
+} cupidimage_kitty_options;
+
 int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image *out,
                         char *err, size_t errcap);
 int cupidimage_load_png_file(const char *path, cupidimage_image *out,
@@ -172,6 +179,36 @@ void cupidimage_free_animation(cupidimage_animation *anim);
 
 int cupidimage_render_ansi(const cupidimage_image *img, FILE *out,
                            int max_width, int max_height);
+
+/* Kitty graphics protocol */
+int cupidimage_is_kitty_terminal(void);
+
+int cupidimage_render_kitty(const cupidimage_image *img, FILE *out,
+                           uint32_t term_width, uint32_t term_height,
+                           char *err, size_t errcap);
+
+int cupidimage_render_kitty_with_options(const cupidimage_image *img, FILE *out,
+                                        uint32_t term_width, uint32_t term_height,
+                                        const cupidimage_kitty_options *opts,
+                                        char *err, size_t errcap);
+
+int cupidimage_render_kitty_animation(const cupidimage_animation *anim, FILE *out,
+                                     uint32_t term_width, uint32_t term_height,
+                                     char *err, size_t errcap);
+
+int cupidimage_render_kitty_animation_with_options(const cupidimage_animation *anim, FILE *out,
+                                                   uint32_t term_width, uint32_t term_height,
+                                                   const cupidimage_kitty_options *opts,
+                                                   char *err, size_t errcap);
+
+int cupidimage_kitty_delete_image(FILE *out, uint32_t image_id,
+                                 char *err, size_t errcap);
+
+int cupidimage_kitty_delete_placement(FILE *out, uint32_t image_id,
+                                     uint32_t placement_id,
+                                     char *err, size_t errcap);
+
+int cupidimage_kitty_delete_all(FILE *out, char *err, size_t errcap);
 
 #ifdef __cplusplus
 } /* extern "C" */

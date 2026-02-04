@@ -13,7 +13,7 @@
 #include <unistd.h>
 
 static void usage(const char *prog) {
-    fprintf(stderr, "usage: %s [--fit] [--svg-time seconds] [--pdf-page number] <image-file> [max_width] [max_height]\n", prog);
+    fprintf(stderr, "usage: %s [--fit] [--width cols] [--height rows] [--svg-time seconds] [--pdf-page number] <image-file> [max_width] [max_height]\n", prog);
 }
 
 static int is_gif_file(const char *path) {
@@ -512,6 +512,44 @@ static int analyze_svg_animation_timeline(const char *text, float *duration_s, i
     return found || css_found;
 }
 
+static void apply_fit(int *maxw, int *maxh) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
+        return;
+    }
+    if (*maxw <= 0 && ws.ws_col > 0) {
+        *maxw = (int)ws.ws_col;
+    }
+    if (*maxh <= 0 && ws.ws_row > 1) {
+        *maxh = (int)ws.ws_row - 1;
+    }
+}
+
+static int render_image(const cupidimage_image *img, int maxw, int maxh) {
+    char err[256];
+    if (cupidimage_is_kitty_terminal()) {
+        if (cupidimage_render_kitty(img, stdout, (uint32_t)maxw, (uint32_t)maxh, err, sizeof(err))) {
+            return 1;
+        }
+        /* Fallback to ANSI on error */
+        fprintf(stderr, "kitty render failed: %s, falling back to ANSI\n", err);
+    }
+    return cupidimage_render_ansi(img, stdout, maxw, maxh);
+}
+
+static int render_animation(const cupidimage_animation *anim, int maxw, int maxh) {
+    char err[256];
+    if (cupidimage_is_kitty_terminal()) {
+        if (cupidimage_render_kitty_animation(anim, stdout, (uint32_t)maxw, (uint32_t)maxh, err, sizeof(err))) {
+            return 1;
+        }
+        /* Fallback to frame-by-frame rendering on error */
+        fprintf(stderr, "kitty animation render failed: %s, falling back to ANSI\n", err);
+    }
+    /* Fallback: not in Kitty or Kitty rendering failed */
+    return 0;
+}
+
 static int render_svg_animation(const char *path, int maxw, int maxh, char *err, size_t errcap) {
     char *text = NULL;
     size_t text_size = 0;
@@ -584,7 +622,7 @@ static int render_svg_animation(const char *path, int maxw, int maxh, char *err,
                 return -1;
             }
             fputs("\x1b[H", stdout);
-            if (!cupidimage_render_ansi(&img, stdout, maxw, maxh)) {
+            if (!render_image(&img, maxw, maxh)) {
                 cupidimage_free(&img);
                 fputs("\x1b[?25h", stdout);
                 snprintf(err, errcap, "render error");
@@ -612,19 +650,6 @@ static int render_svg_animation(const char *path, int maxw, int maxh, char *err,
     return 1;
 }
 
-static void apply_fit(int *maxw, int *maxh) {
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0) {
-        return;
-    }
-    if (*maxw <= 0 && ws.ws_col > 0) {
-        *maxw = (int)ws.ws_col;
-    }
-    if (*maxh <= 0 && ws.ws_row > 1) {
-        *maxh = (int)ws.ws_row - 1;
-    }
-}
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage(argv[0]);
@@ -639,10 +664,28 @@ int main(int argc, char **argv) {
     float svg_time = 0.0f;
     int has_pdf_page = 0;
     int pdf_page = 0;
+    int width_cols = 0;  /* For --width */
+    int height_rows = 0; /* For --height */
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--fit") == 0) {
             fit = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--width") == 0) {
+            if (i + 1 >= argc || !parse_int(argv[i + 1], &width_cols) || width_cols <= 0) {
+                usage(argv[0]);
+                return 1;
+            }
+            i++;
+            continue;
+        }
+        if (strcmp(argv[i], "--height") == 0) {
+            if (i + 1 >= argc || !parse_int(argv[i + 1], &height_rows) || height_rows <= 0) {
+                usage(argv[0]);
+                return 1;
+            }
+            i++;
             continue;
         }
         if (strcmp(argv[i], "--svg-time") == 0) {
@@ -686,6 +729,14 @@ int main(int argc, char **argv) {
         apply_fit(&maxw, &maxh);
     }
 
+    /* Override maxw/maxh if --width or --height were specified */
+    if (width_cols > 0) {
+        maxw = width_cols;
+    }
+    if (height_rows > 0) {
+        maxh = height_rows;
+    }
+
     char err[128];
     if (is_gif_file(path)) {
         cupidimage_animation anim;
@@ -699,7 +750,7 @@ int main(int argc, char **argv) {
             return 1;
         }
         if (anim.frame_count == 1) {
-            if (!cupidimage_render_ansi(&anim.frames[0], stdout, maxw, maxh)) {
+            if (!render_image(&anim.frames[0], maxw, maxh)) {
                 fprintf(stderr, "render error\n");
                 cupidimage_free_animation(&anim);
                 return 1;
@@ -708,6 +759,13 @@ int main(int argc, char **argv) {
             return 0;
         }
 
+        /* Try Kitty animation rendering first */
+        if (render_animation(&anim, maxw, maxh)) {
+            cupidimage_free_animation(&anim);
+            return 0;
+        }
+
+        /* Fallback: manual frame-by-frame animation */
         fputs("\x1b[?25l\x1b[2J", stdout);
         uint32_t loops = anim.loop_count;
         if (loops == 0) {
@@ -716,7 +774,7 @@ int main(int argc, char **argv) {
         for (uint32_t loop = 0; loop < loops; loop++) {
             for (uint32_t i = 0; i < anim.frame_count; i++) {
                 fputs("\x1b[H", stdout);
-                if (!cupidimage_render_ansi(&anim.frames[i], stdout, maxw, maxh)) {
+                if (!render_image(&anim.frames[i], maxw, maxh)) {
                     fprintf(stderr, "render error\n");
                     cupidimage_free_animation(&anim);
                     fputs("\x1b[?25h", stdout);
@@ -774,7 +832,7 @@ int main(int argc, char **argv) {
             if (page_count > 1 && !has_pdf_page) {
                 fprintf(stderr, "[pdf page %d/%d]\n", page + 1, page_count);
             }
-            if (!cupidimage_render_ansi(&img, stdout, maxw, maxh)) {
+            if (!render_image(&img, maxw, maxh)) {
                 fprintf(stderr, "render error\n");
                 cupidimage_free(&img);
                 return 1;
@@ -813,7 +871,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (!cupidimage_render_ansi(&img, stdout, maxw, maxh)) {
+    if (!render_image(&img, maxw, maxh)) {
         fprintf(stderr, "render error\n");
         cupidimage_free(&img);
         return 1;
