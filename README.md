@@ -3,8 +3,8 @@ cupidimage is a dependency-free C99 library for decoding common image formats an
 Terminal graphics output currently supports:
 - ANSI truecolor escape sequences (`48;2;R;G;B` background colors)
 - Kitty graphics protocol with auto-detection (direct transmission, zlib compression, chunking, animations)
+- Sixel graphics protocol with auto-detection (octree color quantization, multiple dithering modes, animations)
 - No iTerm2 inline image protocol support yet
-- No SIXEL support yet
 
 Supported formats (decoder status):
 - SVG: static subset with shapes (rect/circle/ellipse/line/polyline/polygon/path including arc commands), embedded images (`<image>` with `data:` URIs and local file hrefs), basic text (`<text>/<tspan>/<textPath>` via built-in bitmap font; includes `dominant-baseline`/`alignment-baseline` handling and UTF-8 bullet `•` fallback glyph), presentation + inline styles + basic `<style>` selectors (descendant, child `>`, adjacent `+`, and general sibling `~` combinators, plus basic `[attr]`/`[attr=value]` matching and `display`/`visibility`), transforms, viewBox/preserveAspectRatio, linear/radial gradients, patterns, `hsl()/hsla()` colors, stroke caps/joins/dash, clipPath, luminance and alpha masks (`mask-type`), basic `<use>` references for primitive shapes and `<symbol>` (with symbol `preserveAspectRatio` handling and wrapper style attributes), basic SVG markers (`marker-start`/`marker-mid`/`marker-end`, including `orient=\"auto-start-reverse\"` and improved join-angle placement), and filter primitives: `feGaussianBlur`, `feOffset`, `feColorMatrix`, `feComponentTransfer`, `feMorphology`, `feConvolveMatrix`, `feTurbulence`, `feDisplacementMap`, `feDiffuseLighting`, `feSpecularLighting`, `feTile`, `feImage` (including `data:` URIs), `feFlood`, `feBlend`, `feComposite`, `feMerge` (including Source/Background/FillPaint/StrokePaint filter inputs and primitive subregions). Basic sampled animation support for SMIL (`<set>`, `<animate>`, `<animateTransform>`) and CSS keyframes (subset: `transform`, `stroke-dashoffset`, `stop-color`) via `cupidimage_svg_options.animation_time` / CLI `--svg-time`. Supersampled rasterization for terminal preview. No scripting/DOM, no external web fetches, no custom font loading.
@@ -64,12 +64,13 @@ cc -Isrc -c src/cupidimage_ico.c -o obj/cupidimage_ico.o
 cc -Isrc -c src/cupidimage_tiff.c -o obj/cupidimage_tiff.o
 cc -Isrc -c src/cupidimage_tga.c -o obj/cupidimage_tga.o
 cc -Isrc -c src/cupidimage_svg.c -o obj/cupidimage_svg.o
-ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o obj/cupidimage_tga.o obj/cupidimage_svg.o
+cc -Isrc -c src/cupidimage_sixel.c -o obj/cupidimage_sixel.o
+ar rcs bin/libcupidimage.a obj/cupidimage.o obj/cupidimage_png.o obj/cupidimage_jpeg.o obj/cupidimage_webp.o obj/cupidimage_webp_tables.o obj/cupidimage_webp_lossless.o obj/cupidimage_gif.o obj/cupidimage_bmp.o obj/cupidimage_ico.o obj/cupidimage_tiff.o obj/cupidimage_tga.o obj/cupidimage_svg.o obj/cupidimage_sixel.o
 ```
 
 Build the CLI test app:
 ```sh
-cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_tga.c src/cupidimage_svg.c src/cupidimage_cli.c -o bin/cupidimage -lm
+cc -Isrc src/cupidimage.c src/cupidimage_png.c src/cupidimage_jpeg.c src/cupidimage_webp.c src/cupidimage_webp_tables.c src/cupidimage_webp_lossless.c src/cupidimage_gif.c src/cupidimage_bmp.c src/cupidimage_ico.c src/cupidimage_tiff.c src/cupidimage_tga.c src/cupidimage_svg.c src/cupidimage_sixel.c src/cupidimage_cli.c -o bin/cupidimage -lm
 ```
 
 Use the CLI:
@@ -81,6 +82,9 @@ Use the CLI:
 ./bin/cupidimage --svg-time 1.5 assets/svg/animation_basic.svg
 ./bin/cupidimage document.pdf
 ./bin/cupidimage --pdf-page 3 document.pdf
+./bin/cupidimage --sixel test.png
+./bin/cupidimage --sixel-colors 128 --sixel-dither atkinson test.jpg
+./bin/cupidimage --ansi test.png  # Force ANSI mode (disable auto-detection)
 ```
 
 When stdout is an interactive terminal, SVG files containing SMIL animation tags (`<animate>`, `<animateTransform>`, `<set>`) or CSS `animation`/`@keyframes` now auto-play.
@@ -169,6 +173,65 @@ opts.image_id = 42;            /* custom image ID */
 opts.delete_previous = 1;       /* delete previous images */
 
 cupidimage_render_kitty_with_options(&img, stdout, 0, 0, &opts, err, sizeof(err));
+```
+
+Sixel graphics protocol usage (auto-detection):
+```c
+#include "cupidimage.h"
+
+int main(void) {
+    cupidimage_image img;
+    char err[128];
+
+    if (!cupidimage_load_image_file("photo.jpg", &img, err, sizeof(err))) {
+        fprintf(stderr, "Error: %s\n", err);
+        return 1;
+    }
+
+    /* Auto-detect and use Sixel protocol if available */
+    if (cupidimage_is_sixel_terminal()) {
+        cupidimage_render_sixel(&img, stdout, 0, 0, err, sizeof(err));
+    } else if (cupidimage_is_kitty_terminal()) {
+        cupidimage_render_kitty(&img, stdout, 0, 0, err, sizeof(err));
+    } else {
+        cupidimage_render_ansi(&img, stdout, 120, 60);
+    }
+
+    cupidimage_free(&img);
+    return 0;
+}
+```
+
+Advanced Sixel options:
+```c
+cupidimage_sixel_options opts = {0};
+opts.max_colors = 128;          /* Use 128-color palette */
+opts.dither_mode = 2;           /* Atkinson dithering */
+opts.use_transparency = 0;      /* Blend alpha with background */
+opts.background_color = 0x000000;  /* Black background for blending */
+opts.pixel_aspect_ratio = 2.0f; /* Manual aspect ratio */
+opts.delete_previous = 1;       /* Clear screen before render */
+
+cupidimage_render_sixel_with_options(&img, stdout, 0, 0, &opts, err, sizeof(err));
+```
+
+Sixel animation usage:
+```c
+cupidimage_animation anim;
+if (cupidimage_load_gif_animation_file("anim.gif", &anim, err, sizeof(err))) {
+    if (cupidimage_is_sixel_terminal()) {
+        cupidimage_sixel_options opts = {0};
+        opts.max_colors = 256;
+        opts.dither_mode = 1;  /* Floyd-Steinberg */
+        cupidimage_render_sixel_animation_with_options(&anim, stdout, 0, 0, &opts, err, sizeof(err));
+    } else {
+        /* Manual frame-by-frame rendering */
+        for (uint32_t i = 0; i < anim.frame_count; i++) {
+            cupidimage_render_ansi(&anim.frames[i], stdout, 120, 60);
+        }
+    }
+    cupidimage_free_animation(&anim);
+}
 ```
 
 SVG sampled animation usage:

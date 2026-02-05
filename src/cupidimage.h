@@ -80,6 +80,15 @@ typedef struct cupidimage_kitty_options {
     int delete_previous;         /* 1 = delete before render, 0 = keep (default) */
 } cupidimage_kitty_options;
 
+typedef struct cupidimage_sixel_options {
+    uint32_t max_colors;         /* 2-256, default 256 */
+    uint8_t dither_mode;         /* 0=none, 1=Floyd-Steinberg (default), 2=Atkinson, 3=ordered */
+    uint8_t use_transparency;    /* 0=blend with bg (default), 1=native transparency */
+    uint32_t background_color;   /* RGB for alpha blending, default 0xFFFFFF (white) */
+    float pixel_aspect_ratio;    /* 0=auto-detect (2.0), >0=manual */
+    int delete_previous;         /* 1=clear before render, 0=keep (default) */
+} cupidimage_sixel_options;
+
 int cupidimage_load_png(const unsigned char *data, size_t size, cupidimage_image *out,
                         char *err, size_t errcap);
 int cupidimage_load_png_file(const char *path, cupidimage_image *out,
@@ -209,6 +218,27 @@ int cupidimage_kitty_delete_placement(FILE *out, uint32_t image_id,
                                      char *err, size_t errcap);
 
 int cupidimage_kitty_delete_all(FILE *out, char *err, size_t errcap);
+
+/* Sixel graphics protocol */
+int cupidimage_is_sixel_terminal(void);
+
+int cupidimage_render_sixel(const cupidimage_image *img, FILE *out,
+                            uint32_t term_width, uint32_t term_height,
+                            char *err, size_t errcap);
+
+int cupidimage_render_sixel_with_options(const cupidimage_image *img, FILE *out,
+                                        uint32_t term_width, uint32_t term_height,
+                                        const cupidimage_sixel_options *opts,
+                                        char *err, size_t errcap);
+
+int cupidimage_render_sixel_animation(const cupidimage_animation *anim, FILE *out,
+                                     uint32_t term_width, uint32_t term_height,
+                                     char *err, size_t errcap);
+
+int cupidimage_render_sixel_animation_with_options(const cupidimage_animation *anim, FILE *out,
+                                                   uint32_t term_width, uint32_t term_height,
+                                                   const cupidimage_sixel_options *opts,
+                                                   char *err, size_t errcap);
 
 #ifdef __cplusplus
 } /* extern "C" */

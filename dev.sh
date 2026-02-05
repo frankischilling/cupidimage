@@ -89,6 +89,8 @@ LIB_SOURCES=(
     "${SRCDIR}/cupidimage_pdf.c"
     "${SRCDIR}/cupidimage_svg.c"
     "${SRCDIR}/cupidimage_svg_base.c"
+    "${SRCDIR}/cupidimage_kitty.c"
+    "${SRCDIR}/cupidimage_sixel.c"
 )
 
 # Compile library object files
@@ -116,7 +118,7 @@ fi
 
 # Compile CLI executable
 echo -e "${YELLOW}Compiling CLI executable...${NC}"
-CLI_SOURCES="${SRCDIR}/cupidimage.c ${SRCDIR}/cupidimage_internal.c ${SRCDIR}/cupidimage_png.c ${SRCDIR}/cupidimage_jpeg.c ${SRCDIR}/cupidimage_webp.c ${SRCDIR}/cupidimage_webp_tables.c ${SRCDIR}/cupidimage_webp_lossless.c ${SRCDIR}/cupidimage_gif.c ${SRCDIR}/cupidimage_bmp.c ${SRCDIR}/cupidimage_ico.c ${SRCDIR}/cupidimage_tiff.c ${SRCDIR}/cupidimage_tga.c ${SRCDIR}/cupidimage_pdf.c ${SRCDIR}/cupidimage_svg.c ${SRCDIR}/cupidimage_svg_base.c ${SRCDIR}/cupidimage_cli.c"
+CLI_SOURCES="${SRCDIR}/cupidimage.c ${SRCDIR}/cupidimage_internal.c ${SRCDIR}/cupidimage_png.c ${SRCDIR}/cupidimage_jpeg.c ${SRCDIR}/cupidimage_webp.c ${SRCDIR}/cupidimage_webp_tables.c ${SRCDIR}/cupidimage_webp_lossless.c ${SRCDIR}/cupidimage_gif.c ${SRCDIR}/cupidimage_bmp.c ${SRCDIR}/cupidimage_ico.c ${SRCDIR}/cupidimage_tiff.c ${SRCDIR}/cupidimage_tga.c ${SRCDIR}/cupidimage_pdf.c ${SRCDIR}/cupidimage_svg.c ${SRCDIR}/cupidimage_svg_base.c ${SRCDIR}/cupidimage_kitty.c ${SRCDIR}/cupidimage_sixel.c ${SRCDIR}/cupidimage_cli.c"
 
 if ${CC} ${CFLAGS} ${INCLUDES} ${CLI_SOURCES} -o ${BINDIR}/cupidimage ${LDLIBS}; then
     echo -e "  ${GREEN}✓${NC} cupidimage CLI built"
