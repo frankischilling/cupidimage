@@ -260,6 +260,8 @@ int cupidimage_render_kitty_with_options(const cupidimage_image *img, FILE *out,
 
     free(compressed);
     free(b64);
+    fprintf(out, "\n");
+    fflush(out);
     return 1;
 }
 
@@ -411,6 +413,7 @@ int cupidimage_render_kitty_animation_with_options(
 
     /* Start the animation: s=3 (run normally), v=1 (loop infinitely) */
     fprintf(out, "\033_Ga=a,i=%u,s=3,v=1,q=1\033\\", img_id);
+    fprintf(out, "\n");
     fflush(out);
 
     return 1;
